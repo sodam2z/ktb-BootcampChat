@@ -1,0 +1,12 @@
+node_modules/
+**/node_modules/
+
+**/.next/
+
+# 환경 변수
+.env
+.env.*
+!.env.example
+
+# Java / Maven build
+**/target/

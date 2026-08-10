@@ -35,17 +35,17 @@ class SessionServiceUnitTest {
     private SessionService sessionService;
 
     @Test
-    @DisplayName("세션 생성은 기존 사용자 세션을 제거한 뒤 새 세션을 저장한다")
-    void createSession_RemovesExistingSessionsBeforeSave() {
+    @DisplayName("세션 생성은 사용자 기준으로 원자적 교체한다")
+    void createSession_AtomicallyReplacesSessionByUserId() {
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        when(sessionStore.save(any(Session.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(sessionStore.replaceByUserId(any(Session.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         SessionCreationResult result = sessionService.createSession(
                 USER_ID,
                 new SessionMetadata("agent", "127.0.0.1", "device"));
 
-        verify(sessionStore).deleteAll(USER_ID);
-        verify(sessionStore).save(sessionCaptor.capture());
+        verify(sessionStore, never()).deleteAll(USER_ID);
+        verify(sessionStore).replaceByUserId(sessionCaptor.capture());
         Session savedSession = sessionCaptor.getValue();
         assertThat(result.getSessionId()).isEqualTo(savedSession.getSessionId());
         assertThat(result.getExpiresIn()).isEqualTo(SessionService.SESSION_TTL_SEC);
@@ -56,7 +56,7 @@ class SessionServiceUnitTest {
     @Test
     @DisplayName("세션 생성 중 저장소 실패는 RuntimeException으로 래핑된다")
     void createSession_StoreFailure_ThrowsRuntimeException() {
-        doThrow(new IllegalStateException("store down")).when(sessionStore).deleteAll(USER_ID);
+        doThrow(new IllegalStateException("store down")).when(sessionStore).replaceByUserId(any(Session.class));
 
         RuntimeException exception = assertThrows(
                 RuntimeException.class,
@@ -65,6 +65,7 @@ class SessionServiceUnitTest {
         assertThat(exception).hasMessage("세션 생성 중 오류가 발생했습니다.");
         assertThat(exception).hasRootCauseInstanceOf(IllegalStateException.class);
         verify(sessionStore, never()).save(any(Session.class));
+        verify(sessionStore, never()).deleteAll(USER_ID);
     }
 
     @Test

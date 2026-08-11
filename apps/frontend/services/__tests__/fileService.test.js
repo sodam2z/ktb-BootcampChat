@@ -36,16 +36,10 @@ describe('fileService', () => {
     expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it.each([400, 409])(
-    'falls back to multipart upload when presign returns %s',
-    async (status) => {
+  it('uses the observable multipart upload contract by default', async () => {
     const file = new File(['image'], 'profile.jpg', { type: 'image/jpeg' });
 
-    axiosInstance.post
-      .mockRejectedValueOnce({
-        status,
-      })
-      .mockResolvedValueOnce({
+    axiosInstance.post.mockResolvedValueOnce({
         data: {
           success: true,
           file: {
@@ -56,9 +50,9 @@ describe('fileService', () => {
 
     const result = await fileService.uploadFile(file);
 
-    expect(axiosInstance.post).toHaveBeenCalledTimes(2);
-    expect(axiosInstance.post.mock.calls[1][0]).toContain('/api/files/upload');
-    expect(axiosInstance.post.mock.calls[1][1]).toBeInstanceOf(FormData);
+    expect(axiosInstance.post).toHaveBeenCalledTimes(1);
+    expect(axiosInstance.post.mock.calls[0][0]).toContain('/api/files/upload');
+    expect(axiosInstance.post.mock.calls[0][1]).toBeInstanceOf(FormData);
     expect(result).toMatchObject({
       success: true,
       data: {
@@ -67,6 +61,5 @@ describe('fileService', () => {
         },
       },
     });
-    }
-  );
+  });
 });

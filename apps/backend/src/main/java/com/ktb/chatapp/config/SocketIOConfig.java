@@ -13,6 +13,8 @@ import com.ktb.chatapp.websocket.socketio.ChatDataStore;
 import com.ktb.chatapp.websocket.socketio.LocalChatDataStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.ObjectProvider;
@@ -84,13 +86,14 @@ public class SocketIOConfig {
                  host, port, config.getBossThreads(), config.getWorkerThreads());
         var socketIOServer = new SocketIOServer(config);
         socketIOServer.getNamespace(Namespace.DEFAULT_NAME).addAuthTokenListener(authTokenListener);
+        Map<String, Counter> eventCounters = new ConcurrentHashMap<>();
         socketIOServer.getNamespace(Namespace.DEFAULT_NAME).addEventInterceptor((client, name, data, ack) -> {
-            // 이벤트 발생 빈도 수집
-            Counter.builder("socketio.events.total")
-                .description("Total Socket.IO events received")
-                .tag("event_type", name)
-                .register(meterRegistry)
-                .increment();
+            eventCounters.computeIfAbsent(name, eventName ->
+                    Counter.builder("socketio.events.total")
+                            .description("Total Socket.IO events received")
+                            .tag("event_type", eventName)
+                            .register(meterRegistry))
+                    .increment();
         });
         
         return socketIOServer;

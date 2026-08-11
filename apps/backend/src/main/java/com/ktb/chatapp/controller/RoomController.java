@@ -165,7 +165,17 @@ public class RoomController {
             }
 
             Room savedRoom = roomService.createRoom(createRoomRequest, principal.getName());
-            RoomResponse roomResponse = mapToRoomResponse(savedRoom, principal.getName(), false);
+            // The create screen only needs the new id for navigation. Avoid a
+            // second user lookup and participant DTO expansion on every VUser.
+            RoomResponse roomResponse = RoomResponse.builder()
+                    .id(savedRoom.getId())
+                    .name(savedRoom.getName())
+                    .hasPassword(savedRoom.isHasPassword())
+                    .participants(List.of())
+                    .createdAtDateTime(savedRoom.getCreatedAt())
+                    .isCreator(true)
+                    .recentMessageCount(0)
+                    .build();
 
             return ResponseEntity.status(201).body(
                 Map.of(
@@ -204,6 +214,7 @@ public class RoomController {
     public ResponseEntity<?> getRoomById(
             @Parameter(description = "채팅방 ID", example = "60d5ec49f1b2c8b9e8c4f2a1") @PathVariable String roomId,
             @RequestParam(defaultValue = "true") boolean includeRecentCount,
+            @RequestParam(defaultValue = "true") boolean includeParticipants,
             Principal principal) {
         try {
             Optional<Room> roomOpt = roomService.findRoomById(roomId);
@@ -214,7 +225,8 @@ public class RoomController {
             }
 
             Room room = roomOpt.get();
-            RoomResponse roomResponse = mapToRoomResponse(room, principal.getName(), includeRecentCount);
+            RoomResponse roomResponse = mapToRoomResponse(
+                    room, principal.getName(), includeRecentCount, includeParticipants);
 
             return ResponseEntity.ok(
                 Map.of(
@@ -258,12 +270,10 @@ public class RoomController {
                         .body(StandardResponse.error("채팅방을 찾을 수 없습니다."));
             }
 
-            RoomResponse roomResponse = mapToRoomResponse(joinedRoom, principal.getName(), false);
-            
             return ResponseEntity.ok(
                 Map.of(
                     "success", true,
-                    "data", roomResponse
+                    "data", Map.of("roomId", joinedRoom.getId())
                 )
             );
 
@@ -284,7 +294,18 @@ public class RoomController {
     }
 
     private RoomResponse mapToRoomResponse(Room room, String name, boolean includeRecentCount) {
-        LinkedHashSet<String> responseUserIds = new LinkedHashSet<>(room.getParticipantIds());
+        return mapToRoomResponse(room, name, includeRecentCount, true);
+    }
+
+    private RoomResponse mapToRoomResponse(
+            Room room,
+            String name,
+            boolean includeRecentCount,
+            boolean includeParticipants) {
+        LinkedHashSet<String> responseUserIds = new LinkedHashSet<>();
+        if (includeParticipants) {
+            responseUserIds.addAll(room.getParticipantIds());
+        }
         responseUserIds.add(room.getCreator());
         Map<String, User> usersById = loadUsersById(responseUserIds);
         User creator = usersById.get(room.getCreator());
@@ -292,12 +313,14 @@ public class RoomController {
             throw new RuntimeException("Creator not found for room " + room.getId());
         }
         UserResponse creatorSummary = UserResponse.from(creator);
-        List<UserResponse> participantSummaries = room.getParticipantIds()
-                .stream()
-                .map(usersById::get)
-                .filter(java.util.Objects::nonNull)
-                .map(UserResponse::from)
-                .toList();
+        List<UserResponse> participantSummaries = includeParticipants
+                ? room.getParticipantIds()
+                        .stream()
+                        .map(usersById::get)
+                        .filter(java.util.Objects::nonNull)
+                        .map(UserResponse::from)
+                        .toList()
+                : List.of();
 
         boolean isCreator = room.getCreator().equals(name) || creator.getEmail().equalsIgnoreCase(name);
 

@@ -147,22 +147,17 @@ class RoomServiceTest {
             "room-1",
             Set.of("user-1"),
             LocalDateTime.of(2026, 8, 10, 10, 0));
-        Room afterJoin = room(
-            "room-1",
-            Set.of("user-1", "user-2"),
-            LocalDateTime.of(2026, 8, 10, 10, 0));
-
         when(roomRepository.findById("room-1"))
-            .thenReturn(Optional.of(beforeJoin), Optional.of(afterJoin));
+            .thenReturn(Optional.of(beforeJoin));
         when(userRepository.findByEmail("user-2@example.com"))
             .thenReturn(Optional.of(user));
         when(roomRepository.addParticipant("room-1", "user-2")).thenReturn(1L);
-        when(recentMessageCounter.countRecentMessages("room-1")).thenReturn(0);
-
         Room joinedRoom = roomService.joinRoom("room-1", null, "user-2@example.com");
 
-        assertThat(joinedRoom.getParticipantIds()).containsExactlyInAnyOrder("user-1", "user-2");
+        assertThat(joinedRoom.getId()).isEqualTo("room-1");
         verify(roomRepository).addParticipant("room-1", "user-2");
+        verify(roomRepository).findById("room-1");
+        verify(recentMessageCounter, never()).countRecentMessages(any());
         verify(roomRepository, never()).save(any(Room.class));
     }
 

@@ -189,7 +189,9 @@ export const useRoomHandling = ({
           response = await api.get(`/api/rooms/${roomId}`, {
             handleAuthError: false,
             headers: getAuthHeaders(user),
-            params: { includeRecentCount: false },
+            // Input readiness does not depend on the full participant list.
+            // Avoid serializing every user in a hot public room before join.
+            params: { includeRecentCount: false, includeParticipants: false },
           });
         } catch (error) {
           if (error.response?.status === 401) {

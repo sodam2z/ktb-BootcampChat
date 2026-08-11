@@ -106,7 +106,7 @@ class ChatMessageHandlerTest {
     }
 
     @Test
-    void handleChatMessage_echoesSavedMessageToSenderSocket() {
+    void handleChatMessage_broadcastsSavedMessageOnceThroughRoom() {
         SocketIOClient client = mock(SocketIOClient.class);
         BroadcastOperations roomOperations = mock(BroadcastOperations.class);
         SocketUser socketUser = new SocketUser("user-1", "tester", "session-1", "socket-1");
@@ -138,8 +138,8 @@ class ChatMessageHandlerTest {
         handler.handleChatMessage(client, request);
 
         ArgumentCaptor<MessageResponse> payloadCaptor = ArgumentCaptor.forClass(MessageResponse.class);
-        verify(client).sendEvent(eq(MESSAGE), payloadCaptor.capture());
-        verify(roomOperations).sendEvent(eq(MESSAGE), any(MessageResponse.class));
+        verify(roomOperations).sendEvent(eq(MESSAGE), payloadCaptor.capture());
+        verify(client, never()).sendEvent(eq(MESSAGE), any(MessageResponse.class));
         verify(roomActivityNotifier).notifyMessageStored("room-1");
         org.junit.jupiter.api.Assertions.assertEquals("message-1", payloadCaptor.getValue().getId());
         org.junit.jupiter.api.Assertions.assertEquals("hello", payloadCaptor.getValue().getContent());

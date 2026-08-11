@@ -2,7 +2,6 @@ package com.ktb.chatapp.service;
 
 import com.ktb.chatapp.dto.*;
 import com.ktb.chatapp.event.RoomCreatedEvent;
-import com.ktb.chatapp.event.RoomUpdatedEvent;
 import com.ktb.chatapp.model.Room;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.RoomRepository;
@@ -40,8 +39,9 @@ public class RoomService {
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
     private final Map<Integer, CachedRoomsResponse> roomListCache = new ConcurrentHashMap<>();
+    private final Map<Integer, Object> roomListLoadLocks = new ConcurrentHashMap<>();
 
-    @Value("${rooms.list-cache-ttl:2s}")
+    @Value("${rooms.list-cache-ttl:1s}")
     private Duration roomListCacheTtl;
 
     public RoomsResponse getAllRooms(int page) {
@@ -51,40 +51,49 @@ public class RoomService {
             return cached.response();
         }
 
-        try {
-            PageRequest pageRequest = PageRequest.of(
-                page,
-                ROOM_LIST_PAGE_SIZE,
-                Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-            Page<Room> roomPage = roomRepository.findAll(pageRequest);
-            List<Room> rooms = roomPage.getContent();
-            if (rooms.isEmpty()) {
-                return successfulRoomsResponse(List.of(), roomPage);
+        Object pageLock = roomListLoadLocks.computeIfAbsent(page, ignored -> new Object());
+        synchronized (pageLock) {
+            now = System.nanoTime();
+            cached = roomListCache.get(page);
+            if (cached != null && cached.expiresAtNanos() > now) {
+                return cached.response();
             }
 
-            Set<String> roomIds = rooms.stream()
-                .map(Room::getId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-            Map<String, Integer> recentMessageCounts =
-                recentMessageCounter.countRecentMessagesByRoomIds(roomIds);
+            try {
+                PageRequest pageRequest = PageRequest.of(
+                    page,
+                    ROOM_LIST_PAGE_SIZE,
+                    Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+                Page<Room> roomPage = roomRepository.findAll(pageRequest);
+                List<Room> rooms = roomPage.getContent();
+                if (rooms.isEmpty()) {
+                    return successfulRoomsResponse(List.of(), roomPage);
+                }
 
-            List<RoomListItemResponse> roomResponses = rooms.stream()
-                .map(room -> mapToRoomListItemResponse(
-                    room,
-                    recentMessageCounts.getOrDefault(room.getId(), 0)))
-                .toList();
+                Set<String> roomIds = rooms.stream()
+                    .map(Room::getId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+                Map<String, Integer> recentMessageCounts =
+                    recentMessageCounter.countRecentMessagesByRoomIds(roomIds);
 
-            RoomsResponse response = successfulRoomsResponse(roomResponses, roomPage);
-            cacheRoomsResponse(page, response, now);
-            return response;
+                List<RoomListItemResponse> roomResponses = rooms.stream()
+                    .map(room -> mapToRoomListItemResponse(
+                        room,
+                        recentMessageCounts.getOrDefault(room.getId(), 0)))
+                    .toList();
 
-        } catch (Exception e) {
-            log.error("방 목록 조회 에러", e);
-            return RoomsResponse.builder()
-                .success(false)
-                .data(List.of())
-                .build();
+                RoomsResponse response = successfulRoomsResponse(roomResponses, roomPage);
+                cacheRoomsResponse(page, response, now);
+                return response;
+
+            } catch (Exception e) {
+                log.error("방 목록 조회 에러", e);
+                return RoomsResponse.builder()
+                    .success(false)
+                    .data(List.of())
+                    .build();
+            }
         }
     }
 
@@ -149,7 +158,8 @@ public class RoomService {
         }
 
         Room savedRoom = roomRepository.save(room);
-        roomListCache.clear();
+        // Keep the previous page snapshot for the short TTL. Clearing every
+        // page here turns a creation spike into a room-list cache stampede.
         
         // Publish event for room created
         try {
@@ -185,20 +195,8 @@ public class RoomService {
 
         // 전체 Room 문서를 read-modify-save 하면 동시 입장이 서로의
         // participantIds를 덮어쓸 수 있다. MongoDB $addToSet으로 참여자만
-        // 원자적으로 추가하고, 응답/이벤트에는 갱신된 문서를 사용한다.
+        // 원자적으로 추가한다. 호출자는 navigation에 필요한 room id만 사용한다.
         roomRepository.addParticipant(roomId, user.getId());
-        room = roomRepository.findById(roomId)
-            .orElseThrow(() -> new RuntimeException("채팅방을 찾을 수 없습니다: " + roomId));
-        
-        // Publish event for room updated
-        try {
-            RoomListItemResponse roomResponse = mapToRoomListItemResponse(
-                room,
-                recentMessageCounter.countRecentMessages(room.getId()));
-            eventPublisher.publishEvent(new RoomUpdatedEvent(this, roomId, roomResponse));
-        } catch (Exception e) {
-            log.error("roomUpdate 이벤트 발행 실패", e);
-        }
 
         return room;
     }

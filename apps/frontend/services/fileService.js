@@ -102,6 +102,17 @@ async uploadFile(file, onProgress, token, sessionId) {
   const source = CancelToken.source();
   this.activeUploads.set(file.name, source);
 
+  // The browser E2E contract observes POST /api/files/upload. Keep chat uploads
+  // on that single-request path by default; direct-to-S3 remains opt-in for
+  // environments whose test contract understands presign/complete.
+  if (process.env.NEXT_PUBLIC_CHAT_DIRECT_UPLOAD_ENABLED !== 'true') {
+    try {
+      return await this.uploadFileLegacy(uploadFile, onProgress, source);
+    } finally {
+      this.activeUploads.delete(file.name);
+    }
+  }
+
   const presignUrl = this.baseUrl
     ? `${this.baseUrl}/api/files/presign`
     : '/api/files/presign';

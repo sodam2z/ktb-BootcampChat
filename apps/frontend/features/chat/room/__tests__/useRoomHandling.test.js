@@ -249,7 +249,7 @@ describe('useRoomHandling', () => {
     expect(api.get).toHaveBeenCalledWith(
       '/api/rooms/room-1',
       expect.objectContaining({
-        params: { includeRecentCount: false },
+        params: { includeRecentCount: false, includeParticipants: false },
       }),
     );
     expect(socketClient.subscribeRoomEvents).toHaveBeenCalledWith(

@@ -40,6 +40,9 @@ import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.*;
 @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class ChatMessageHandler {
+    public static final String SESSION_VALIDATED_AT = "sessionValidatedAt";
+    private static final long SESSION_VALIDATION_LEASE_MILLIS = Duration.ofSeconds(5).toMillis();
+
     private final SocketIOServer socketIOServer;
     private final MessageRepository messageRepository;
     private final FileRepository fileRepository;
@@ -82,16 +85,21 @@ public class ChatMessageHandler {
             return;
         }
 
-        SessionValidationResult validation =
-                sessionService.validateSession(socketUser.id(), socketUser.authSessionId());
-        if (!validation.isValid()) {
-            recordError("session_expired");
-            client.sendEvent(ERROR, Map.of(
-                    "code", "SESSION_EXPIRED",
-                    "message", "세션이 만료되었습니다. 다시 로그인해주세요."
-            ));
-            timerSample.stop(createTimer("error", "session_expired"));
-            return;
+        Long sessionValidatedAt = client.get(SESSION_VALIDATED_AT);
+        long now = System.currentTimeMillis();
+        if (sessionValidatedAt == null || now - sessionValidatedAt >= SESSION_VALIDATION_LEASE_MILLIS) {
+            SessionValidationResult validation =
+                    sessionService.validateSession(socketUser.id(), socketUser.authSessionId());
+            if (!validation.isValid()) {
+                recordError("session_expired");
+                client.sendEvent(ERROR, Map.of(
+                        "code", "SESSION_EXPIRED",
+                        "message", "세션이 만료되었습니다. 다시 로그인해주세요."
+                ));
+                timerSample.stop(createTimer("error", "session_expired"));
+                return;
+            }
+            client.set(SESSION_VALIDATED_AT, now);
         }
 
         // Rate limit check
@@ -157,7 +165,6 @@ public class ChatMessageHandler {
 
             socketIOServer.getRoomOperations(roomId)
                     .sendEvent(MESSAGE, messageResponse);
-            client.sendEvent(MESSAGE, messageResponse);
 
             roomActivityNotifier.notifyMessageStored(roomId);
 

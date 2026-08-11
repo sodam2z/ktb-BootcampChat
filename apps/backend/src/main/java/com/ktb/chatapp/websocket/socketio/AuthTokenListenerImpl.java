@@ -9,6 +9,7 @@ import com.ktb.chatapp.service.JwtService;
 import com.ktb.chatapp.service.SessionService;
 import com.ktb.chatapp.service.SessionValidationResult;
 import com.ktb.chatapp.websocket.socketio.handler.ConnectionLoginHandler;
+import com.ktb.chatapp.websocket.socketio.handler.ChatMessageHandler;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -60,6 +61,7 @@ public class AuthTokenListenerImpl implements AuthTokenListener {
                 log.error("Session validation failed: {}", validationResult.getMessage());
                 return new AuthTokenResult(false, Map.of("message", "Invalid session"));
             }
+            client.set(ChatMessageHandler.SESSION_VALIDATED_AT, System.currentTimeMillis());
 
             // Load user from database
             User user = userRepository.findById(userId).orElse(null);

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import { CameraIcon, CloseOutlineIcon } from '@vapor-ui/icons';
 import { Button, Text, Callout, IconButton, VStack, HStack } from '@vapor-ui/core';
 import { useAuth } from '@/contexts/AuthContext';
@@ -10,6 +11,8 @@ import { optimizeProfileImage } from '@/lib/profile/optimizeProfileImage';
 
 const PROFILE_IMAGE_RESIZE_ENABLED =
   process.env.NEXT_PUBLIC_PROFILE_IMAGE_RESIZE_ENABLED === 'true';
+const PROFILE_DIRECT_UPLOAD_ENABLED =
+  process.env.NEXT_PUBLIC_PROFILE_DIRECT_UPLOAD_ENABLED !== 'false';
 
 const ProfileImageUpload = ({ currentImage, onImageChange }) => {
   const { user } = useAuth();
@@ -64,23 +67,41 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
         ? await optimizeProfileImage(file)
         : file;
 
-      // FormData 생성
-      const formData = new FormData();
-      formData.append('profileImage', uploadFile);
-
-      // 파일 업로드 요청
-      const response = await api.post(
-        '/api/users/profile-image',
-        formData,
-        {
-          // 파일 업로드는 서버에 저장된 뒤 응답만 유실될 수 있으므로 자동 재시도하지 않는다.
-          // 재시도는 중복 객체와 추가 부하를 만들 수 있다.
-          skipRetry: true,
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+      let response;
+      if (PROFILE_DIRECT_UPLOAD_ENABLED) {
+        try {
+          const presignResponse = await api.post('/api/users/profile-image/presign', {
+            originalname: uploadFile.name,
+            mimetype: uploadFile.type,
+            size: uploadFile.size,
+          });
+          const { uploadUrl, key } = presignResponse.data;
+          await axios.put(uploadUrl, uploadFile, {
+            headers: { 'Content-Type': uploadFile.type },
+            timeout: 30000,
+          });
+          response = await api.post('/api/users/profile-image/complete', {
+            key,
+            originalname: uploadFile.name,
+            mimetype: uploadFile.type,
+            size: uploadFile.size,
+          }, { skipRetry: true });
+        } catch (directUploadError) {
+          const status = directUploadError.response?.status;
+          if (status !== 400 && status !== 409) {
+            throw directUploadError;
+          }
         }
-      );
+      }
+
+      if (!response) {
+        const formData = new FormData();
+        formData.append('profileImage', uploadFile);
+        response = await api.post('/api/users/profile-image', formData, {
+          skipRetry: true,
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
 
       const data = response.data;
 

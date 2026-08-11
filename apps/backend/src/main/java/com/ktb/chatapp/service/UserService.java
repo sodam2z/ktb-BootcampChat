@@ -5,6 +5,8 @@ import com.ktb.chatapp.dto.UpdateProfileRequest;
 import com.ktb.chatapp.dto.UserResponse;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.UserRepository;
+import com.ktb.chatapp.exception.DirectUploadNotSupportedException;
+import com.ktb.chatapp.storage.StorageKey;
 import com.ktb.chatapp.storage.StoragePort;
 import com.ktb.chatapp.util.FileUtil;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.net.URI;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
@@ -35,6 +39,9 @@ public class UserService {
 
     @Value("${app.profile.image.max-size:5242880}") // 5MB
     private long maxProfileImageSize;
+
+    @Value("${app.s3.presign-ttl:10m}")
+    private Duration profilePresignTtl;
 
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(
             "jpg", "jpeg", "png", "gif", "webp"
@@ -110,6 +117,80 @@ public class UserService {
         log.debug("프로필 이미지 업로드 완료 - User ID: {}, Key: {}", previousUser.getId(), profileImageKey);
 
         return ProfileImageResponse.updated(profileImageKey);
+    }
+
+    public PreparedProfileUpload prepareProfileImageUpload(
+            String email,
+            String originalFilename,
+            String contentType,
+            long size) {
+        validateProfileImageMetadata(originalFilename, contentType, size);
+        User user = userRepository.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
+        String safeFileName = user.getId() + "_" + FileUtil.generateSafeFileName(originalFilename);
+        String key = StorageKey.profile(safeFileName);
+        URI uploadUrl = storagePort.presignUploadUrl(key, contentType, profilePresignTtl)
+                .orElseThrow(DirectUploadNotSupportedException::new);
+        return new PreparedProfileUpload(uploadUrl.toString(), key);
+    }
+
+    public ProfileImageResponse completeProfileImageUpload(
+            String email,
+            String key,
+            String originalFilename,
+            String contentType,
+            long size) {
+        validateProfileImageMetadata(originalFilename, contentType, size);
+        User user = userRepository.findByEmail(email.toLowerCase())
+                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
+        String expectedPrefix = StorageKey.profile(user.getId() + "_");
+        if (key == null || !key.startsWith(expectedPrefix)) {
+            throw new IllegalArgumentException("허용되지 않은 프로필 이미지 key입니다.");
+        }
+
+        var storedObject = storagePort.stat(key)
+                .orElseThrow(() -> new IllegalArgumentException("업로드된 프로필 이미지를 찾을 수 없습니다."));
+        if (storedObject.size() != size
+                || (storedObject.contentType() != null && !storedObject.contentType().equals(contentType))) {
+            throw new IllegalArgumentException("업로드된 프로필 이미지 정보가 일치하지 않습니다.");
+        }
+
+        User previousUser;
+        try {
+            previousUser = mongoOperations.findAndModify(
+                    Query.query(Criteria.where("email").is(email.toLowerCase())),
+                    new Update().set("profileImage", key).set("updatedAt", LocalDateTime.now()),
+                    FindAndModifyOptions.options().returnNew(false),
+                    User.class);
+        } catch (RuntimeException e) {
+            deleteProfileImageFile(key, "DB 저장 실패 후 직접 업로드 프로필 이미지 정리");
+            throw e;
+        }
+        if (previousUser == null) {
+            deleteProfileImageFile(key, "사용자 없음으로 직접 업로드 프로필 이미지 정리");
+            throw new UsernameNotFoundException("사용자를 찾을 수 없습니다.");
+        }
+        String oldKey = previousUser.getProfileImage();
+        if (oldKey != null && !oldKey.isEmpty() && !oldKey.equals(key)) {
+            deleteProfileImageFile(oldKey, "기존 프로필 이미지 삭제");
+        }
+        return ProfileImageResponse.updated(key);
+    }
+
+    private void validateProfileImageMetadata(String originalFilename, String contentType, long size) {
+        if (size <= 0 || size > maxProfileImageSize) {
+            throw new IllegalArgumentException("파일 크기는 5MB를 초과할 수 없습니다.");
+        }
+        if (contentType == null || !contentType.startsWith("image/") || originalFilename == null) {
+            throw new IllegalArgumentException("이미지 파일만 업로드할 수 있습니다.");
+        }
+        String extension = FileUtil.getFileExtension(originalFilename).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.contains(extension)) {
+            throw new IllegalArgumentException("이미지 파일만 업로드할 수 있습니다.");
+        }
+    }
+
+    public record PreparedProfileUpload(String uploadUrl, String key) {
     }
 
     /**

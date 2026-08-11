@@ -95,43 +95,11 @@ public class RoomJoinHandler {
                     JOIN_GUARD_TTL_MINUTES,
                     TimeUnit.MINUTES);
 
-            if (userRooms.isInRoom(userId, roomId)) {
-                log.debug("User {} already joined socket room {}", userId, roomId);
-                client.joinRoom(roomId);
-                client.sendEvent(JOIN_ROOM_SUCCESS, Map.of("roomId", roomId));
-                return;
-            }
-
-            if (roomRepository.addParticipant(roomId, userId) == 0) {
-                if (!roomRepository.existsById(roomId)) {
-                    client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "Room not found"));
-                    return;
-                }
-                log.debug("User {} already in room {}", userId, roomId);
-                client.joinRoom(roomId);
-                userRooms.add(userId, roomId);
-                client.sendEvent(JOIN_ROOM_SUCCESS, Map.of("roomId", roomId));
-                return;
-            }
+            boolean alreadyTrackedInRoom = userRooms.isInRoom(userId, roomId);
+            boolean newParticipant = !alreadyTrackedInRoom && roomRepository.addParticipant(roomId, userId) > 0;
 
             client.joinRoom(roomId);
             userRooms.add(userId, roomId);
-
-            Message joinMessage = Message.builder()
-                    .roomId(roomId)
-                    .content(userName + " joined the room.")
-                    .type(MessageType.system)
-                    .timestamp(LocalDateTime.now())
-                    .mentions(new ArrayList<>())
-                    .reactions(new HashMap<>())
-                    .readers(new ArrayList<>())
-                    .metadata(new HashMap<>())
-                    .build();
-
-            joinMessage = messageRepository.save(joinMessage);
-
-            FetchMessagesRequest req = new FetchMessagesRequest(roomId, 30, null);
-            FetchMessagesResponse messageLoadResult = messageLoader.loadMessages(req, userId);
 
             Optional<Room> roomOpt = roomRepository.findById(roomId);
             if (roomOpt.isEmpty()) {
@@ -139,7 +107,32 @@ public class RoomJoinHandler {
                 return;
             }
 
-            List<UserResponse> participants = loadParticipants(roomOpt.get().getParticipantIds());
+            Room room = roomOpt.get();
+            if (room.getParticipantIds() == null || !room.getParticipantIds().contains(userId)) {
+                client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "Room access denied"));
+                return;
+            }
+
+            Message joinMessage = null;
+            if (newParticipant) {
+                joinMessage = Message.builder()
+                        .roomId(roomId)
+                        .content(userName + " joined the room.")
+                        .type(MessageType.system)
+                        .timestamp(LocalDateTime.now())
+                        .mentions(new ArrayList<>())
+                        .reactions(new HashMap<>())
+                        .readers(new ArrayList<>())
+                        .metadata(new HashMap<>())
+                        .build();
+
+                joinMessage = messageRepository.save(joinMessage);
+            }
+
+            FetchMessagesRequest req = new FetchMessagesRequest(roomId, 30, null);
+            FetchMessagesResponse messageLoadResult = messageLoader.loadMessages(req, userId);
+
+            List<UserResponse> participants = loadParticipants(room.getParticipantIds());
 
             JoinRoomSuccessResponse response = JoinRoomSuccessResponse.builder()
                     .roomId(roomId)
@@ -151,10 +144,12 @@ public class RoomJoinHandler {
 
             client.sendEvent(JOIN_ROOM_SUCCESS, response);
 
-            socketIOServer.getRoomOperations(roomId)
-                    .sendEvent(MESSAGE, messageResponseMapper.mapToMessageResponse(joinMessage, null));
+            if (newParticipant && joinMessage != null) {
+                socketIOServer.getRoomOperations(roomId)
+                        .sendEvent(MESSAGE, messageResponseMapper.mapToMessageResponse(joinMessage, null));
 
-            scheduleParticipantsUpdate(roomId, participants);
+                scheduleParticipantsUpdate(roomId, participants);
+            }
 
             log.info("User {} joined room {} successfully. Message count: {}, hasMore: {}",
                     userName, roomId, messageLoadResult.getMessages().size(), messageLoadResult.isHasMore());

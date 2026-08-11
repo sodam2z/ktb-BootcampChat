@@ -1,119 +1,130 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import socketClient from '@/lib/socket/socketClient';
 import { useRoomsSocket } from '../useRoomsSocket';
 
 vi.mock('@/lib/socket/socketClient', () => ({
-  default: {
-    connect: vi.fn(),
-  },
+  default: { connect: vi.fn() },
 }));
 
-const currentUser = {
-  token: 'token-1',
-  sessionId: 'session-1',
-};
-
-const renderRoomsSocket = (socket, overrides = {}) => {
-  socketClient.connect.mockResolvedValue(socket);
-
-  return renderHook(() =>
-    useRoomsSocket({
-      currentUser,
-      router: { push: vi.fn() },
-      setConnectionStatus: vi.fn(),
-      setRooms: vi.fn(),
-      ...overrides,
-    })
-  );
-};
-
-const createSocket = () => ({
-  on: vi.fn(),
-  emit: vi.fn(),
-  disconnect: vi.fn(),
-});
-
-const handlerFor = (socket, event) =>
-  socket.on.mock.calls.find(([registered]) => registered === event)[1];
+const currentUser = { token: 'token-1', sessionId: 'session-1' };
 
 describe('useRoomsSocket', () => {
+  let handlers;
+  let socket;
+
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('does not emit joinRoomList because the server joins room-list on connect', async () => {
-    const socket = {
-      on: vi.fn(),
+    handlers = {};
+    socket = {
+      on: vi.fn((event, handler) => {
+        handlers[event] = handler;
+      }),
       emit: vi.fn(),
       disconnect: vi.fn(),
     };
+    socketClient.connect.mockResolvedValue(socket);
+  });
 
-    renderRoomsSocket(socket);
+  const renderRoomsSocket = (currentPage = 0) => {
+    const setRooms = vi.fn();
+    const setMetadata = vi.fn();
+    const setConnectionStatus = vi.fn();
+    const result = renderHook(
+      ({ page }) => useRoomsSocket({
+        currentUser,
+        currentPage: page,
+        setRooms,
+        setMetadata,
+        setConnectionStatus,
+      }),
+      { initialProps: { page: currentPage } },
+    );
+    return { ...result, setRooms, setMetadata };
+  };
 
-    await waitFor(() => {
-      expect(socket.on).toHaveBeenCalledWith('connect', expect.any(Function));
-    });
+  it('does not emit joinRoomList because the server joins room-list on connect', async () => {
+    renderRoomsSocket();
+    await waitFor(() => expect(handlers.connect).toBeTypeOf('function'));
 
-    const connectHandler = socket.on.mock.calls.find(([event]) => event === 'connect')[1];
-    connectHandler();
+    act(() => handlers.connect());
 
     expect(socket.emit).not.toHaveBeenCalledWith('joinRoomList');
   });
 
   it('does not register roomDeleted without a server-side room delete event', async () => {
-    const socket = {
-      on: vi.fn(),
-      emit: vi.fn(),
-      disconnect: vi.fn(),
-    };
+    renderRoomsSocket();
+    await waitFor(() => expect(socket.on).toHaveBeenCalled());
 
-    renderRoomsSocket(socket);
-
-    await waitFor(() => {
-      expect(socket.on).toHaveBeenCalled();
-    });
-
-    const registeredEvents = socket.on.mock.calls.map(([event]) => event);
-    expect(registeredEvents).not.toContain('roomDeleted');
+    expect(Object.keys(handlers)).not.toContain('roomDeleted');
   });
 
-  it('merges a roomActivity update into the matching room without dropping its other fields', async () => {
-    const socket = createSocket();
-    const setRooms = vi.fn();
+  it('prepends a created room on the first page and keeps only 20 rows', async () => {
+    const { setRooms, setMetadata } = renderRoomsSocket(0);
+    await waitFor(() => expect(handlers.roomCreated).toBeTypeOf('function'));
 
-    renderRoomsSocket(socket, { setRooms });
-
-    await waitFor(() => {
-      expect(socket.on).toHaveBeenCalledWith('roomActivity', expect.any(Function));
-    });
-
-    handlerFor(socket, 'roomActivity')({ _id: 'room-2', recentMessageCount: 9 });
+    act(() => handlers.roomCreated({ _id: 'new-room' }));
 
     const updateRooms = setRooms.mock.calls[0][0];
+    const previousRooms = Array.from({ length: 20 }, (_, index) => ({ _id: `room-${index}` }));
+    expect(updateRooms(previousRooms)).toHaveLength(20);
+    expect(updateRooms(previousRooms)[0]).toEqual({ _id: 'new-room' });
 
-    expect(
-      updateRooms([
-        { _id: 'room-1', name: '방1', recentMessageCount: 1 },
-        { _id: 'room-2', name: '방2', recentMessageCount: 2 },
-      ])
-    ).toEqual([
+    const updateMetadata = setMetadata.mock.calls[0][0];
+    expect(updateMetadata({ total: 20, pageSize: 20, totalPages: 1 })).toMatchObject({
+      total: 21,
+      totalPages: 2,
+    });
+  });
+
+  it('does not shift rows when a room is created on a later page', async () => {
+    const { rerender, setRooms, setMetadata } = renderRoomsSocket(0);
+    await waitFor(() => expect(handlers.roomCreated).toBeTypeOf('function'));
+    rerender({ page: 2 });
+
+    act(() => handlers.roomCreated({ _id: 'new-room' }));
+
+    expect(setRooms).not.toHaveBeenCalled();
+    expect(setMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges room updates only into a matching visible row', async () => {
+    const { setRooms } = renderRoomsSocket(1);
+    await waitFor(() => expect(handlers.roomUpdated).toBeTypeOf('function'));
+
+    act(() => handlers.roomUpdated({ _id: 'room-2', participantCount: 4 }));
+
+    const updateRooms = setRooms.mock.calls[0][0];
+    expect(updateRooms([
+      { _id: 'room-1', participantCount: 1 },
+      { _id: 'room-2', participantCount: 3 },
+    ])).toEqual([
+      { _id: 'room-1', participantCount: 1 },
+      { _id: 'room-2', participantCount: 4 },
+    ]);
+  });
+
+  it('merges a roomActivity update without dropping other fields', async () => {
+    const { setRooms } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomActivity).toBeTypeOf('function'));
+
+    act(() => handlers.roomActivity({ _id: 'room-2', recentMessageCount: 9 }));
+
+    const updateRooms = setRooms.mock.calls[0][0];
+    expect(updateRooms([
+      { _id: 'room-1', name: '방1', recentMessageCount: 1 },
+      { _id: 'room-2', name: '방2', recentMessageCount: 2 },
+    ])).toEqual([
       { _id: 'room-1', name: '방1', recentMessageCount: 1 },
       { _id: 'room-2', name: '방2', recentMessageCount: 9 },
     ]);
   });
 
   it('ignores a roomActivity payload without a room id', async () => {
-    const socket = createSocket();
-    const setRooms = vi.fn();
+    const { setRooms } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomActivity).toBeTypeOf('function'));
 
-    renderRoomsSocket(socket, { setRooms });
-
-    await waitFor(() => {
-      expect(socket.on).toHaveBeenCalledWith('roomActivity', expect.any(Function));
-    });
-
-    handlerFor(socket, 'roomActivity')(undefined);
+    act(() => handlers.roomActivity(undefined));
 
     expect(setRooms).not.toHaveBeenCalled();
   });

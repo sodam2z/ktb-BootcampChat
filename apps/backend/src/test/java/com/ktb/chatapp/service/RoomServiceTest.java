@@ -1,25 +1,22 @@
 package com.ktb.chatapp.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anySet;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import com.ktb.chatapp.dto.RoomResponse;
+import com.ktb.chatapp.dto.RoomListItemResponse;
 import com.ktb.chatapp.dto.RoomsResponse;
 import com.ktb.chatapp.model.Room;
-import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +25,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 @ExtendWith(MockitoExtension.class)
@@ -53,102 +54,93 @@ class RoomServiceTest {
     }
 
     @Test
-    @DisplayName("채팅방 목록의 생성자와 참여자를 한 번에 조회해 응답을 조립한다")
-    void getAllRooms_LoadsDistinctUsersOnceAndMapsResponses() {
-        LocalDateTime older = LocalDateTime.of(2026, 8, 9, 10, 0);
-        LocalDateTime newer = older.plusHours(1);
-        Room olderRoom = room("room-1", "user-1", Set.of("user-1", "user-2"), older);
-        Room newerRoom = room("room-2", "user-2", Set.of("user-2", "user-3"), newer);
-        User user1 = user("user-1", "사용자 1");
-        User user2 = user("user-2", "사용자 2");
-        User user3 = user("user-3", "사용자 3");
+    @DisplayName("채팅방을 최신순으로 20개씩 조회하고 현재 페이지 범위만 집계한다")
+    void getAllRooms_LoadsOnlyRequestedPageInDescendingOrder() {
+        LocalDateTime createdAt = LocalDateTime.of(2026, 8, 10, 10, 0);
+        Room room2 = room("room-2", Set.of("user-1", "user-2"), createdAt);
+        Room room1 = room("room-1", Set.of("user-1"), createdAt);
+        PageRequest requestedPage = PageRequest.of(1, RoomService.ROOM_LIST_PAGE_SIZE);
 
-        when(roomRepository.findAll()).thenReturn(List.of(olderRoom, newerRoom));
-        when(userRepository.findAllById(anySet())).thenReturn(List.of(user1, user2, user3));
+        when(roomRepository.findAll(any(Pageable.class))).thenReturn(
+            new PageImpl<>(List.of(room2, room1), requestedPage, 42));
         when(recentMessageCounter.countRecentMessagesByRoomIds(anySet()))
-            .thenReturn(Map.of("room-1", 3, "room-2", 5));
+            .thenReturn(Map.of("room-2", 5));
 
-        RoomsResponse response = roomService.getAllRooms("user@example.com");
+        RoomsResponse response = roomService.getAllRooms(1);
 
         assertThat(response.isSuccess()).isTrue();
-        assertThat(response.getData()).extracting(RoomResponse::getId)
+        assertThat(response.getData()).extracting(RoomListItemResponse::getId)
             .containsExactly("room-2", "room-1");
-        assertThat(response.getData().get(0).getCreator().getId()).isEqualTo("user-2");
-        assertThat(response.getData().get(0).getParticipants())
-            .extracting(participant -> participant.getId())
-            .containsExactlyInAnyOrder("user-2", "user-3");
-        assertThat(response.getData().get(0).getRecentMessageCount()).isEqualTo(5);
-        assertThat(response.getMetadata().getTotal()).isEqualTo(2);
+        assertThat(response.getData()).extracting(RoomListItemResponse::getParticipantCount)
+            .containsExactly(2, 1);
+        assertThat(response.getData()).extracting(RoomListItemResponse::getRecentMessageCount)
+            .containsExactly(5, 0);
+        assertThat(response.getMetadata().getTotal()).isEqualTo(42);
+        assertThat(response.getMetadata().getPage()).isEqualTo(1);
+        assertThat(response.getMetadata().getPageSize()).isEqualTo(20);
+        assertThat(response.getMetadata().getTotalPages()).isEqualTo(3);
+        assertThat(response.getMetadata().isHasMore()).isTrue();
         assertThat(response.getMetadata().getCurrentCount()).isEqualTo(2);
+        assertThat(response.getMetadata().getSort().getField()).isEqualTo("createdAt");
+        assertThat(response.getMetadata().getSort().getOrder()).isEqualTo("DESC");
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Iterable<String>> userIdsCaptor = ArgumentCaptor.forClass(Iterable.class);
-        verify(userRepository).findAllById(userIdsCaptor.capture());
-        assertThat(StreamSupport.stream(userIdsCaptor.getValue().spliterator(), false))
-            .containsExactlyInAnyOrder("user-1", "user-2", "user-3");
-        verify(userRepository, never()).findById(anyString());
-        verify(recentMessageCounter, times(1))
-            .countRecentMessagesByRoomIds(Set.of("room-1", "room-2"));
-        verify(recentMessageCounter, never()).countRecentMessages(anyString());
+        ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+        verify(roomRepository).findAll(pageableCaptor.capture());
+        Pageable pageable = pageableCaptor.getValue();
+        assertThat(pageable.getPageNumber()).isEqualTo(1);
+        assertThat(pageable.getPageSize()).isEqualTo(20);
+        assertThat(pageable.getSort().getOrderFor("createdAt").getDirection())
+            .isEqualTo(Sort.Direction.DESC);
+        assertThat(pageable.getSort().getOrderFor("id").getDirection())
+            .isEqualTo(Sort.Direction.DESC);
+        verify(recentMessageCounter).countRecentMessagesByRoomIds(Set.of("room-1", "room-2"));
+        verifyNoInteractions(userRepository);
     }
 
     @Test
-    @DisplayName("조회되지 않은 생성자는 null로 두고 조회되지 않은 참여자는 제외한다")
-    void getAllRooms_OmitsMissingParticipantsAndKeepsMissingCreatorNull() {
-        Room room = room("room-1", "missing-creator", Set.of("user-1", "missing-user"),
-            LocalDateTime.of(2026, 8, 10, 10, 0));
-        when(roomRepository.findAll()).thenReturn(List.of(room));
-        when(userRepository.findAllById(anySet())).thenReturn(List.of(user("user-1", "사용자 1")));
-        when(recentMessageCounter.countRecentMessagesByRoomIds(anySet())).thenReturn(Map.of());
+    @DisplayName("범위를 벗어난 빈 페이지는 추가 조회 없이 메타데이터와 함께 반환한다")
+    void getAllRooms_OutOfRangePageSkipsRelatedQueries() {
+        PageRequest requestedPage = PageRequest.of(3, RoomService.ROOM_LIST_PAGE_SIZE);
+        when(roomRepository.findAll(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(), requestedPage, 2));
 
-        RoomsResponse response = roomService.getAllRooms("user@example.com");
-
-        assertThat(response.isSuccess()).isTrue();
-        assertThat(response.getData()).singleElement().satisfies(roomResponse -> {
-            assertThat(roomResponse.getCreator()).isNull();
-            assertThat(roomResponse.getParticipants())
-                .extracting(participant -> participant.getId())
-                .containsExactly("user-1");
-            assertThat(roomResponse.getRecentMessageCount()).isZero();
-        });
-        verify(userRepository).findAllById(anySet());
-        verify(userRepository, never()).findById(anyString());
-        verify(recentMessageCounter).countRecentMessagesByRoomIds(Set.of("room-1"));
-        verify(recentMessageCounter, never()).countRecentMessages(anyString());
-    }
-
-    @Test
-    @DisplayName("채팅방이 없으면 사용자와 최근 메시지를 조회하지 않는다")
-    void getAllRooms_EmptyRoomsSkipsUserAndMessageQueries() {
-        when(roomRepository.findAll()).thenReturn(List.of());
-
-        RoomsResponse response = roomService.getAllRooms("user@example.com");
+        RoomsResponse response = roomService.getAllRooms(3);
 
         assertThat(response.isSuccess()).isTrue();
         assertThat(response.getData()).isEmpty();
-        assertThat(response.getMetadata().getTotal()).isZero();
+        assertThat(response.getMetadata().getTotal()).isEqualTo(2);
+        assertThat(response.getMetadata().getPage()).isEqualTo(3);
+        assertThat(response.getMetadata().getCurrentCount()).isZero();
+        assertThat(response.getMetadata().isHasMore()).isFalse();
         verifyNoInteractions(userRepository, recentMessageCounter);
     }
 
-    private Room room(
-            String id,
-            String creatorId,
-            Set<String> participantIds,
-            LocalDateTime createdAt) {
+    @Test
+    @DisplayName("마지막 페이지는 다음 페이지가 없다고 표시한다")
+    void getAllRooms_LastPageHasNoMorePages() {
+        Room room = room(
+            "room-21",
+            Set.of("user-1"),
+            LocalDateTime.of(2026, 8, 10, 10, 0));
+        PageRequest requestedPage = PageRequest.of(1, RoomService.ROOM_LIST_PAGE_SIZE);
+        when(roomRepository.findAll(any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(room), requestedPage, 21));
+        when(recentMessageCounter.countRecentMessagesByRoomIds(anySet())).thenReturn(Map.of());
+
+        RoomsResponse response = roomService.getAllRooms(1);
+
+        assertThat(response.getMetadata().getTotalPages()).isEqualTo(2);
+        assertThat(response.getMetadata().isHasMore()).isFalse();
+        verify(userRepository, never()).findAllById(anySet());
+    }
+
+    private Room room(String id, Set<String> participantIds, LocalDateTime createdAt) {
         return Room.builder()
             .id(id)
             .name("채팅방 " + id)
-            .creator(creatorId)
+            .creator("user-1")
             .participantIds(participantIds)
             .createdAt(createdAt)
-            .build();
-    }
-
-    private User user(String id, String name) {
-        return User.builder()
-            .id(id)
-            .name(name)
-            .email(id + "@example.com")
             .build();
     }
 }

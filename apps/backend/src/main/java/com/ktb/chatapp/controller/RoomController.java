@@ -81,11 +81,13 @@ public class RoomController {
         }
     }
 
-    // 전체 채팅방 목록 조회
-    @Operation(summary = "채팅방 목록 조회", description = "전체 채팅방 목록을 최신순으로 조회합니다. Rate Limit이 적용됩니다.")
+    // 채팅방 목록 페이지 조회
+    @Operation(summary = "채팅방 목록 조회", description = "채팅방 목록을 최신순으로 20개씩 조회합니다. Rate Limit이 적용됩니다.")
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "채팅방 목록 조회 성공",
             content = @Content(schema = @Schema(implementation = RoomsResponse.class))),
+        @ApiResponse(responseCode = "400", description = "유효하지 않은 페이지 번호",
+            content = @Content(schema = @Schema(implementation = StandardResponse.class))),
         @ApiResponse(responseCode = "401", description = "인증 실패",
             content = @Content(schema = @Schema(implementation = StandardResponse.class))),
         @ApiResponse(responseCode = "429", description = "요청 한도 초과",
@@ -96,10 +98,17 @@ public class RoomController {
     })
     @GetMapping
     @RateLimit
-    public ResponseEntity<?> getAllRooms(Principal principal) {
+    public ResponseEntity<?> getAllRooms(
+            @Parameter(description = "0부터 시작하는 페이지 번호", example = "0")
+            @RequestParam(defaultValue = "0") int page) {
+
+        if (page < 0) {
+            return ResponseEntity.badRequest().body(
+                StandardResponse.error("페이지 번호는 0 이상이어야 합니다."));
+        }
 
         try {
-            RoomsResponse response = roomService.getAllRooms(principal.getName());
+            RoomsResponse response = roomService.getAllRooms(page);
 
             // 캐시 설정
             return ResponseEntity.ok()

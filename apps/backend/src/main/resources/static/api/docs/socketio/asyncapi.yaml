@@ -155,14 +155,14 @@ channels:
     address: roomCreated
     messages:
       roomCreatedResponse:
-        $ref: '#/components/messages/RoomResponse'
+        $ref: '#/components/messages/RoomListItemResponse'
     description: 채팅방 생성 알림
 
   roomUpdated:
     address: roomUpdated
     messages:
       roomUpdatedResponse:
-        $ref: '#/components/messages/RoomResponse'
+        $ref: '#/components/messages/RoomListItemResponse'
     description: 채팅방 정보 업데이트
 
   roomActivity:
@@ -551,13 +551,13 @@ components:
         items:
           $ref: '#/components/schemas/UserResponse'
 
-    RoomResponse:
-      name: RoomResponse
-      title: 채팅방 응답
-      summary: 채팅방 정보 페이로드
+    RoomListItemResponse:
+      name: RoomListItemResponse
+      title: 채팅방 목록 항목 응답
+      summary: 채팅방 목록용 경량 페이로드
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/RoomResponse'
+        $ref: '#/components/schemas/RoomListItemResponse'
 
     RoomActivityResponse:
       name: RoomActivity
@@ -1047,7 +1047,7 @@ components:
         - messages
         - hasMore
 
-    RoomResponse:
+    RoomListItemResponse:
       type: object
       properties:
         _id:
@@ -1059,27 +1059,23 @@ components:
         hasPassword:
           type: boolean
           description: 비밀번호 설정 여부
-        creator:
-          $ref: '#/components/schemas/UserResponse'
-        participants:
-          type: array
-          items:
-            $ref: '#/components/schemas/UserResponse'
-          description: 참가자 목록
-        participantsCount:
+        participantCount:
           type: integer
           description: 참가자 수
+        recentMessageCount:
+          type: integer
+          description: 최근 30분간 메시지 수
         createdAt:
           type: string
           format: date-time
           description: 생성 날짜
-        isCreator:
-          type: boolean
-          description: 현재 사용자가 생성자인지 여부
       required:
         - _id
         - name
         - hasPassword
+        - participantCount
+        - recentMessageCount
+        - createdAt
 
     ErrorPayload:
       type: object

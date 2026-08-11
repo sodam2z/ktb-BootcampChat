@@ -43,12 +43,17 @@ vi.mock('../useRoomList', () => ({
   useRoomList: () => ({
     rooms: [],
     setRooms: vi.fn(),
+    metadata: { total: 0, page: 0, pageSize: 20, totalPages: 0 },
+    setMetadata: vi.fn(),
+    currentPage: 0,
     error: mocks.error,
     loading: false,
     refreshing: false,
     joiningRoom: false,
+    pageLoading: false,
     fetchRooms: mocks.fetchRooms,
     refreshRooms: mocks.refreshRooms,
+    changePage: vi.fn(),
     handleJoinRoom: vi.fn(),
   }),
 }));

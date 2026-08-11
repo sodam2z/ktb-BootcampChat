@@ -18,7 +18,6 @@ export const useRoomList = ({
   connectionStatus,
   setConnectionStatus,
   isRetrying,
-  attemptConnection,
 }) => {
   const [rooms, setRooms] = useState([]);
   const [error, setError] = useState(null);
@@ -80,8 +79,6 @@ export const useRoomList = ({
   }, []);
 
   const loadRooms = useCallback(async (requestedPage = currentPage) => {
-    await attemptConnection();
-
     let payload = await requestRoomsPage(requestedPage);
     let resolvedPage = requestedPage;
 
@@ -101,7 +98,7 @@ export const useRoomList = ({
     setRooms(payload.data);
     setMetadata(payload.metadata);
     setCurrentPage(resolvedPage);
-  }, [attemptConnection, currentPage, requestRoomsPage]);
+  }, [currentPage, requestRoomsPage]);
 
   const fetchRooms = useCallback(async () => {
     if (!currentUser?.token || isLoadingRef.current) {

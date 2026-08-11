@@ -62,6 +62,28 @@ describe('useRoomList', () => {
     expect(axiosInstance.get).toHaveBeenCalledWith('/api/rooms', { params: { page: 0 } });
   });
 
+  it('requests rooms without waiting for the socket connection', async () => {
+    axiosInstance.get.mockResolvedValue(roomsResponse([]));
+    const neverConnects = new Promise(() => {});
+
+    const { result } = renderHook(() =>
+      useRoomList({
+        currentUser: { token: 'token-1' },
+        router: { push: vi.fn() },
+        connectionStatus: CONNECTION_STATUS.CHECKING,
+        setConnectionStatus: vi.fn(),
+        isRetrying: false,
+        attemptConnection: vi.fn(() => neverConnects),
+      })
+    );
+
+    await act(async () => {
+      await result.current.fetchRooms();
+    });
+
+    expect(axiosInstance.get).toHaveBeenCalledWith('/api/rooms', { params: { page: 0 } });
+  });
+
   it('keeps the current list and stays quiet when a silent refresh fails', async () => {
     axiosInstance.get.mockResolvedValueOnce(roomsResponse([{ _id: 'room-1' }]));
 

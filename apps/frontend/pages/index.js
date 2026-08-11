@@ -81,12 +81,6 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // 서버 연결 상태 확인 — 로그인을 시도조차 못 한 것이므로 서버 안내로 알린다.
-    if (!serverStatus.connected) {
-      setServerNotice('서버와 연결할 수 없습니다. 인터넷 연결을 확인하고 잠시 후 다시 시도해주세요.');
-      return;
-    }
-
     // 폼 유효성 검사
     if (!validateForm()) {
       return;
@@ -107,7 +101,7 @@ const Login = () => {
 
       // 리다이렉트
       const redirectUrl = router.query.redirect || '/chat';
-      router.push(redirectUrl);
+      await router.push(redirectUrl);
 
     } catch (err) {
       setError(err.message || '로그인 처리 중 오류가 발생했습니다.');
@@ -115,29 +109,6 @@ const Login = () => {
       setLoading(false);
     }
   };
-
-  if (serverStatus.checking) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-[var(--vapor-space-300)] bg-[var(--vapor-color-background)]">
-        <VStack
-          $css={{
-            gap: '$250',
-            width: '400px',
-            padding: '$300',
-            borderRadius: '$300',
-            border: '1px solid var(--vapor-color-border-normal)',
-          }}
-        >
-          <div className="text-center mb-[2rem]">
-            <img src="images/logo-h.png" className="w-1/2 mx-auto" alt="KTB Chat 로고" />
-          </div>
-          <div className="text-center">
-            <Text typography="body1">서버 연결 확인 중...</Text>
-          </div>
-        </VStack>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-(--vapor-space-300) bg-(--vapor-color-background)">
@@ -162,6 +133,12 @@ const Login = () => {
             </Callout.Icon>
             {serverNotice}
           </Callout.Root>
+        )}
+
+        {serverStatus.checking && (
+          <Text typography="body3" data-testid="server-status-checking">
+            서버 연결을 확인하고 있습니다. 로그인은 계속 진행할 수 있습니다.
+          </Text>
         )}
 
         {error && (
@@ -224,7 +201,7 @@ const Login = () => {
           <Button
             type="submit"
             size="lg"
-            disabled={loading || !serverStatus.connected}
+            disabled={loading}
             data-testid="login-submit-button"
           >
             {loading ? '로그인 중...' : '로그인'}
@@ -238,7 +215,7 @@ const Login = () => {
             size="sm"
             variant="ghost"
             onClick={() => router.push('/register')}
-            disabled={loading || !serverStatus.connected}
+            disabled={loading}
           >
             회원가입
           </Button>

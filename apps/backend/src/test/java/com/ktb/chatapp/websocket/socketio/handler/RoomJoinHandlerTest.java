@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +32,9 @@ import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.MESSAGE;
 import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.PARTICIPANTS_UPDATE;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -114,5 +117,33 @@ class RoomJoinHandlerTest {
         verify(client).sendEvent(eq(JOIN_ROOM_SUCCESS), any());
         verify(roomOperations).sendEvent(MESSAGE, joinMessageResponse);
         verify(roomOperations, timeout(1000)).sendEvent(eq(PARTICIPANTS_UPDATE), any());
+    }
+
+    @Test
+    void handleJoinRoom_sendsSuccessForDuplicateJoinRequest() {
+        SocketUser socketUser = new SocketUser("user-1", "tester", "session-1", "socket-1");
+        User user = User.builder().id("user-1").name("tester").email("tester@example.com").build();
+        Room room = Room.builder().id("room-dup").name("room").participantIds(Set.of("user-1")).build();
+        FetchMessagesResponse loadResponse = FetchMessagesResponse.builder()
+                .messages(List.of())
+                .hasMore(false)
+                .build();
+
+        when(client.get("user")).thenReturn(socketUser);
+        when(client.getSessionId()).thenReturn(UUID.fromString("00000000-0000-0000-0000-000000000001"));
+        when(userRooms.isInRoom("user-1", "room-dup")).thenReturn(true);
+        when(roomRepository.findById("room-dup")).thenReturn(Optional.of(room));
+        when(userRepository.findAllById(Set.of("user-1"))).thenReturn(List.of(user));
+        when(messageLoader.loadMessages(any(FetchMessagesRequest.class), eq("user-1")))
+                .thenReturn(loadResponse);
+
+        handler.handleJoinRoom(client, "room-dup");
+        handler.handleJoinRoom(client, "room-dup");
+
+        verify(roomRepository, never()).addParticipant("room-dup", "user-1");
+        verify(messageRepository, never()).save(any(Message.class));
+        verify(client, times(2)).joinRoom("room-dup");
+        verify(userRooms, times(2)).add("user-1", "room-dup");
+        verify(client, times(2)).sendEvent(eq(JOIN_ROOM_SUCCESS), any());
     }
 }

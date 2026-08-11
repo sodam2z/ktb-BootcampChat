@@ -86,17 +86,20 @@ public class RoomJoinHandler {
             }
 
             String joinKey = userId + ":" + roomId + ":" + client.getSessionId();
-            if (!JOIN_RESPONSE_GUARD.add(joinKey)) {
-                log.debug("Ignoring duplicate joinRoom event. userId={}, roomId={}", userId, roomId);
-                return;
+            boolean duplicateJoinRequest = !JOIN_RESPONSE_GUARD.add(joinKey);
+            if (duplicateJoinRequest) {
+                log.debug("Handling duplicate joinRoom event without side effects. userId={}, roomId={}", userId, roomId);
+            } else {
+                participantUpdateExecutor.schedule(
+                        () -> JOIN_RESPONSE_GUARD.remove(joinKey),
+                        JOIN_GUARD_TTL_MINUTES,
+                        TimeUnit.MINUTES);
             }
-            participantUpdateExecutor.schedule(
-                    () -> JOIN_RESPONSE_GUARD.remove(joinKey),
-                    JOIN_GUARD_TTL_MINUTES,
-                    TimeUnit.MINUTES);
 
             boolean alreadyTrackedInRoom = userRooms.isInRoom(userId, roomId);
-            boolean newParticipant = !alreadyTrackedInRoom && roomRepository.addParticipant(roomId, userId) > 0;
+            boolean newParticipant = !duplicateJoinRequest
+                    && !alreadyTrackedInRoom
+                    && roomRepository.addParticipant(roomId, userId) > 0;
 
             client.joinRoom(roomId);
             userRooms.add(userId, roomId);

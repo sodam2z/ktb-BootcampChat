@@ -11,11 +11,13 @@ import static org.mockito.Mockito.when;
 import com.ktb.chatapp.dto.RoomListItemResponse;
 import com.ktb.chatapp.dto.RoomsResponse;
 import com.ktb.chatapp.model.Room;
+import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -132,6 +134,36 @@ class RoomServiceTest {
         assertThat(response.getMetadata().getTotalPages()).isEqualTo(2);
         assertThat(response.getMetadata().isHasMore()).isFalse();
         verify(userRepository, never()).findAllById(anySet());
+    }
+
+    @Test
+    @DisplayName("채팅방 입장은 참여자를 원자적으로 추가하고 전체 문서를 저장하지 않는다")
+    void joinRoom_AddsParticipantAtomically() {
+        User user = User.builder()
+            .id("user-2")
+            .email("user-2@example.com")
+            .build();
+        Room beforeJoin = room(
+            "room-1",
+            Set.of("user-1"),
+            LocalDateTime.of(2026, 8, 10, 10, 0));
+        Room afterJoin = room(
+            "room-1",
+            Set.of("user-1", "user-2"),
+            LocalDateTime.of(2026, 8, 10, 10, 0));
+
+        when(roomRepository.findById("room-1"))
+            .thenReturn(Optional.of(beforeJoin), Optional.of(afterJoin));
+        when(userRepository.findByEmail("user-2@example.com"))
+            .thenReturn(Optional.of(user));
+        when(roomRepository.addParticipant("room-1", "user-2")).thenReturn(1L);
+        when(recentMessageCounter.countRecentMessages("room-1")).thenReturn(0);
+
+        Room joinedRoom = roomService.joinRoom("room-1", null, "user-2@example.com");
+
+        assertThat(joinedRoom.getParticipantIds()).containsExactlyInAnyOrder("user-1", "user-2");
+        verify(roomRepository).addParticipant("room-1", "user-2");
+        verify(roomRepository, never()).save(any(Room.class));
     }
 
     private Room room(String id, Set<String> participantIds, LocalDateTime createdAt) {

@@ -28,7 +28,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 
 @SpringBootTest
 @Import({MongoTestContainer.class, RedisTestContainer.class})
@@ -81,7 +81,7 @@ class MessageLoaderIntegrationTest {
         userRepository.save(testUser);
 
         // MessageReadStatusService mock 설정
-        doNothing().when(messageReadStatusService).updateReadStatus(anyList(), anyString());
+        doReturn(0L).when(messageReadStatusService).updateReadStatus(anyList(), anyString());
     }
 
     @AfterEach

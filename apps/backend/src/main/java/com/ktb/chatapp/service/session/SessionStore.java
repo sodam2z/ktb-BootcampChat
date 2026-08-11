@@ -8,7 +8,7 @@ import java.util.Optional;
  * Provides operations for storing and retrieving session data.
  */
 public interface SessionStore {
-    
+
     /**
      * Find session by user ID
      *
@@ -16,13 +16,7 @@ public interface SessionStore {
      * @return Optional containing the Session if found, empty otherwise
      */
     Optional<Session> findByUserId(String userId);
-    
-    /**
-     * Save or update session
-     *
-     * @param session the session to save
-     * @return the saved session
-     */
+
     Session save(Session session);
 
     /**
@@ -32,6 +26,8 @@ public interface SessionStore {
      * @return the stored session
      */
     Session replaceByUserId(Session session);
+
+    Optional<Session> touch(String userId, String sessionId, long lastActivity, java.time.Instant expiresAt);
     
     /**
      * Delete all sessions for a user

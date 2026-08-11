@@ -7,6 +7,7 @@ import com.corundumstudio.socketio.annotation.SpringAnnotationScanner;
 import com.corundumstudio.socketio.namespace.Namespace;
 import com.corundumstudio.socketio.protocol.JacksonJsonSupport;
 import com.corundumstudio.socketio.store.MemoryStoreFactory;
+import com.corundumstudio.socketio.store.RedissonStoreFactory;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ktb.chatapp.websocket.socketio.ChatDataStore;
 import com.ktb.chatapp.websocket.socketio.LocalChatDataStore;
@@ -14,12 +15,14 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Role;
+import org.redisson.api.RedissonClient;
 
 import static org.springframework.beans.factory.config.BeanDefinition.ROLE_INFRASTRUCTURE;
 
@@ -37,8 +40,12 @@ public class SocketIOConfig {
     @Value("${socketio.server.origin:*}")
     private String origin;
 
+    @Value("${socketio.store.type:redis}")
+    private String storeType;
+
     @Bean(initMethod = "start", destroyMethod = "stop")
-    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener, MeterRegistry meterRegistry) {
+    public SocketIOServer socketIOServer(AuthTokenListener authTokenListener, MeterRegistry meterRegistry,
+            ObjectProvider<RedissonClient> redissonClientProvider) {
         com.corundumstudio.socketio.Configuration config = new com.corundumstudio.socketio.Configuration();
         config.setHostname(host);
         config.setPort(port);
@@ -59,7 +66,18 @@ public class SocketIOConfig {
         config.setUpgradeTimeout(10000);
 
         config.setJsonSupport(new JacksonJsonSupport(new JavaTimeModule()));
-        config.setStoreFactory(new MemoryStoreFactory()); // 단일노드 전용
+        if ("redis".equalsIgnoreCase(storeType)) {
+            RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
+            if (redissonClient == null) {
+                throw new IllegalStateException("socketio.store.type=redis requires a RedissonClient");
+            }
+            config.setStoreFactory(new RedissonStoreFactory(redissonClient));
+        } else if ("memory".equalsIgnoreCase(storeType)) {
+            log.warn("Socket.IO is using the single-node memory store");
+            config.setStoreFactory(new MemoryStoreFactory());
+        } else {
+            throw new IllegalArgumentException("Unsupported socketio.store.type: " + storeType);
+        }
 
         log.info("Socket.IO server configured on {}:{} with {} boss threads and {} worker threads",
                  host, port, config.getBossThreads(), config.getWorkerThreads());
@@ -89,9 +107,8 @@ public class SocketIOConfig {
         return new SpringAnnotationScanner(socketIOServer);
     }
     
-    // 인메모리 저장소, 단일 노드 환경에서만 사용
     @Bean
-    @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnProperty(name = "socketio.store.type", havingValue = "memory")
     public ChatDataStore chatDataStore() {
         return new LocalChatDataStore();
     }

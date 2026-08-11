@@ -94,7 +94,7 @@ class RoomLeaveHandlerTest {
                 .build();
 
         when(client.get("user")).thenReturn(socketUser);
-        when(userRooms.isInRoom("user-1", "room-1")).thenReturn(true);
+        when(roomRepository.removeParticipant("room-1", "user-1")).thenReturn(1L);
         when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
         when(userRepository.findById("user-2")).thenReturn(Optional.of(remainingUser));
         when(roomRepository.findById("room-1"))

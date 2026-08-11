@@ -32,6 +32,6 @@ public class Session {
 
     private SessionMetadata metadata;
 
-    @Indexed(expireAfter = SESSION_TTL)
+    @Indexed(expireAfter = "0s")
     private Instant expiresAt;
 }

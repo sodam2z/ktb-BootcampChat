@@ -64,15 +64,14 @@ public class RoomJoinHandler {
                 return;
             }
             
-            // 이미 해당 방에 참여 중인지 확인
-            if (userRooms.isInRoom(userId, roomId)) {
+            // MongoDB의 원자적 $addToSet 결과를 참가 여부의 기준으로 사용한다.
+            if (roomRepository.addParticipant(roomId, userId) == 0) {
                 log.debug("User {} already in room {}", userId, roomId);
                 client.joinRoom(roomId);
+                userRooms.add(userId, roomId);
                 client.sendEvent(JOIN_ROOM_SUCCESS, Map.of("roomId", roomId));
                 return;
             }
-
-            roomRepository.addParticipant(roomId, userId);
 
             // Join socket room and add to user's room set
             client.joinRoom(roomId);

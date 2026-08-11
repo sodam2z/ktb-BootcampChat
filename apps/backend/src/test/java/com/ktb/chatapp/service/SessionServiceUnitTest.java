@@ -16,6 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -151,12 +153,13 @@ class SessionServiceUnitTest {
                 .expiresAt(Instant.now().plusSeconds(SessionService.SESSION_TTL_SEC))
                 .build();
         when(sessionStore.findByUserId(USER_ID)).thenReturn(Optional.of(session));
-        when(sessionStore.save(session)).thenReturn(session);
+        when(sessionStore.touch(eq(USER_ID), eq(SESSION_ID), anyLong(), any(Instant.class)))
+                .thenReturn(Optional.of(session));
 
         SessionValidationResult result = sessionService.validateSession(USER_ID, SESSION_ID);
 
         assertThat(result.isValid()).isTrue();
-        verify(sessionStore).save(session);
+        verify(sessionStore).touch(eq(USER_ID), eq(SESSION_ID), anyLong(), any(Instant.class));
     }
 
     @Test

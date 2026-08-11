@@ -7,6 +7,7 @@ import org.springframework.data.mongodb.repository.Update;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import java.util.List;
 
 @Repository
 public interface RoomRepository extends MongoRepository<Room, String> {
@@ -19,11 +20,13 @@ public interface RoomRepository extends MongoRepository<Room, String> {
     @Query(value = "{}", fields = "{ '_id': 1 }")
     Optional<Room> findOneForHealthCheck();
 
+    List<Room> findByParticipantIdsContaining(String userId);
+
     @Query("{'_id': ?0}")
     @Update("{'$addToSet': {'participantIds': ?1}}")
-    void addParticipant(String roomId, String userId);
+    long addParticipant(String roomId, String userId);
 
     @Query("{'_id': ?0}")
     @Update("{'$pull': {'participantIds': ?1}}")
-    void removeParticipant(String roomId, String userId);
+    long removeParticipant(String roomId, String userId);
 }

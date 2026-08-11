@@ -1,6 +1,8 @@
 package com.ktb.chatapp.service;
 
 import com.ktb.chatapp.event.RoomActivityEvent;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -8,7 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -27,46 +29,57 @@ class RoomActivityNotifierTest {
     }
 
     @Test
-    void notifyMessageStored_firstMessageOfRoom_publishesRecentMessageCount() {
-        when(recentMessageCounter.countRecentMessages("room-1")).thenReturn(7);
+    void flushPublishesRecentMessageCount() {
+        when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
+                .thenReturn(Map.of("room-1", 7));
+        RoomActivityNotifier notifier = notifier();
 
-        notifier().notifyMessageStored("room-1");
+        notifier.notifyMessageStored("room-1");
+        notifier.flushPendingRoomActivities();
 
-        ArgumentCaptor<RoomActivityEvent> eventCaptor =
-                ArgumentCaptor.forClass(RoomActivityEvent.class);
-        verify(eventPublisher).publishEvent(eventCaptor.capture());
-        assertEquals("room-1", eventCaptor.getValue().getRoomId());
-        assertEquals(7, eventCaptor.getValue().getRecentMessageCount());
+        ArgumentCaptor<RoomActivityEvent> event = ArgumentCaptor.forClass(RoomActivityEvent.class);
+        verify(eventPublisher).publishEvent(event.capture());
+        assertThat(event.getValue().getRoomId()).isEqualTo("room-1");
+        assertThat(event.getValue().getRecentMessageCount()).isEqualTo(7);
     }
 
     @Test
-    void notifyMessageStored_everyMessage_publishes() {
-        when(recentMessageCounter.countRecentMessages("room-1")).thenReturn(1);
+    void flushCoalescesRepeatedNotificationsForSameRoom() {
+        when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
+                .thenReturn(Map.of("room-1", 3));
         RoomActivityNotifier notifier = notifier();
 
         notifier.notifyMessageStored("room-1");
         notifier.notifyMessageStored("room-1");
         notifier.notifyMessageStored("room-1");
+        notifier.flushPendingRoomActivities();
 
-        verify(eventPublisher, times(3)).publishEvent(any(RoomActivityEvent.class));
-        verify(recentMessageCounter, times(3)).countRecentMessages("room-1");
+        verify(recentMessageCounter).countRecentMessagesByRoomIds(Set.of("room-1"));
+        verify(eventPublisher).publishEvent(any(RoomActivityEvent.class));
     }
 
     @Test
-    void notifyMessageStored_nullRoomId_doesNothing() {
-        notifier().notifyMessageStored(null);
+    void nullRoomIdDoesNothing() {
+        RoomActivityNotifier notifier = notifier();
+        notifier.notifyMessageStored(null);
+        notifier.flushPendingRoomActivities();
 
-        verifyNoInteractions(recentMessageCounter);
-        verify(eventPublisher, never()).publishEvent(any(RoomActivityEvent.class));
+        verifyNoInteractions(recentMessageCounter, eventPublisher);
     }
 
     @Test
-    void notifyMessageStored_counterFails_swallowsException() {
-        when(recentMessageCounter.countRecentMessages("room-1"))
-                .thenThrow(new RuntimeException("mongo down"));
+    void failedBatchIsRetriedOnNextFlush() {
+        when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
+                .thenThrow(new RuntimeException("mongo down"))
+                .thenReturn(Map.of("room-1", 1));
+        RoomActivityNotifier notifier = notifier();
 
-        notifier().notifyMessageStored("room-1");
-
+        notifier.notifyMessageStored("room-1");
+        notifier.flushPendingRoomActivities();
         verify(eventPublisher, never()).publishEvent(any(RoomActivityEvent.class));
+
+        notifier.flushPendingRoomActivities();
+        verify(recentMessageCounter, times(2)).countRecentMessagesByRoomIds(Set.of("room-1"));
+        verify(eventPublisher).publishEvent(any(RoomActivityEvent.class));
     }
 }

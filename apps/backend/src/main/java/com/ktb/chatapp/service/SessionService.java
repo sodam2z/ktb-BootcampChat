@@ -95,9 +95,11 @@ public class SessionService {
             // 인증 요청마다 MongoDB write를 발생시키지 않는다. 최근에 갱신된 세션은 읽기만 하고
             // 일정 시간이 지난 경우에만 lastActivity와 TTL을 연장한다.
             if (now - session.getLastActivity() >= ACTIVITY_WRITE_INTERVAL_MS) {
-                session.setLastActivity(now);
-                session.setExpiresAt(Instant.now().plusSeconds(SESSION_TTL_SEC));
-                session = sessionStore.save(session);
+                session = sessionStore.touch(userId, sessionId, now,
+                        Instant.now().plusSeconds(SESSION_TTL_SEC)).orElse(null);
+                if (session == null) {
+                    return SessionValidationResult.invalid("INVALID_SESSION", "세션이 교체되었습니다.");
+                }
             }
 
             SessionData sessionData = toSessionData(session);
@@ -122,9 +124,9 @@ public class SessionService {
                 return;
             }
 
-            session.setLastActivity(Instant.now().toEpochMilli());
-            session.setExpiresAt(Instant.now().plusSeconds(SESSION_TTL_SEC));
-            sessionStore.save(session);
+            long now = Instant.now().toEpochMilli();
+            sessionStore.touch(userId, session.getSessionId(), now,
+                    Instant.now().plusSeconds(SESSION_TTL_SEC));
             
         } catch (Exception e) {
             log.error("Failed to update session activity for user: {}", userId, e);

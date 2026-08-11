@@ -10,29 +10,51 @@ import com.ktb.chatapp.dto.UserResponse;
 import com.ktb.chatapp.model.Message;
 import com.ktb.chatapp.model.MessageType;
 import com.ktb.chatapp.model.Room;
+import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import com.ktb.chatapp.websocket.socketio.UserRooms;
+import jakarta.annotation.PreDestroy;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.*;
+import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.JOIN_ROOM;
+import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.JOIN_ROOM_ERROR;
+import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.JOIN_ROOM_SUCCESS;
+import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.MESSAGE;
+import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.PARTICIPANTS_UPDATE;
 
-/**
- * 방 입장 처리 핸들러
- * 채팅방 입장, 참가자 관리, 초기 메시지 로드 담당
- */
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class RoomJoinHandler {
+
+    private static final long PARTICIPANT_UPDATE_DEBOUNCE_MILLIS = 200;
+    private static final long JOIN_GUARD_TTL_MINUTES = 10;
+    private static final Set<String> JOIN_RESPONSE_GUARD = ConcurrentHashMap.newKeySet();
 
     private final SocketIOServer socketIOServer;
     private final MessageRepository messageRepository;
@@ -41,8 +63,17 @@ public class RoomJoinHandler {
     private final UserRooms userRooms;
     private final MessageLoader messageLoader;
     private final MessageResponseMapper messageResponseMapper;
+    @SuppressWarnings("unused")
     private final RoomLeaveHandler roomLeaveHandler;
-    
+    private final Map<String, List<UserResponse>> pendingParticipantUpdates = new ConcurrentHashMap<>();
+    private final Set<String> scheduledParticipantUpdates = ConcurrentHashMap.newKeySet();
+    private final ScheduledExecutorService participantUpdateExecutor =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "participant-update-debouncer");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     @OnEvent(JOIN_ROOM)
     public void handleJoinRoom(SocketIOClient client, String roomId) {
         try {
@@ -53,19 +84,29 @@ public class RoomJoinHandler {
                 client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "Unauthorized"));
                 return;
             }
-            
-            if (userRepository.findById(userId).isEmpty()) {
-                client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "User not found"));
+
+            String joinKey = userId + ":" + roomId + ":" + client.getSessionId();
+            if (!JOIN_RESPONSE_GUARD.add(joinKey)) {
+                log.debug("Ignoring duplicate joinRoom event. userId={}, roomId={}", userId, roomId);
                 return;
             }
-            
-            if (roomRepository.findById(roomId).isEmpty()) {
-                client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "채팅방을 찾을 수 없습니다."));
+            participantUpdateExecutor.schedule(
+                    () -> JOIN_RESPONSE_GUARD.remove(joinKey),
+                    JOIN_GUARD_TTL_MINUTES,
+                    TimeUnit.MINUTES);
+
+            if (userRooms.isInRoom(userId, roomId)) {
+                log.debug("User {} already joined socket room {}", userId, roomId);
+                client.joinRoom(roomId);
+                client.sendEvent(JOIN_ROOM_SUCCESS, Map.of("roomId", roomId));
                 return;
             }
-            
-            // MongoDB의 원자적 $addToSet 결과를 참가 여부의 기준으로 사용한다.
+
             if (roomRepository.addParticipant(roomId, userId) == 0) {
+                if (!roomRepository.existsById(roomId)) {
+                    client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "Room not found"));
+                    return;
+                }
                 log.debug("User {} already in room {}", userId, roomId);
                 client.joinRoom(roomId);
                 userRooms.add(userId, roomId);
@@ -73,72 +114,59 @@ public class RoomJoinHandler {
                 return;
             }
 
-            // Join socket room and add to user's room set
             client.joinRoom(roomId);
             userRooms.add(userId, roomId);
 
             Message joinMessage = Message.builder()
-                .roomId(roomId)
-                .content(userName + "님이 입장하였습니다.")
-                .type(MessageType.system)
-                .timestamp(LocalDateTime.now())
-                .mentions(new ArrayList<>())
-                .reactions(new HashMap<>())
-                .readers(new ArrayList<>())
-                .metadata(new HashMap<>())
-                .build();
+                    .roomId(roomId)
+                    .content(userName + " joined the room.")
+                    .type(MessageType.system)
+                    .timestamp(LocalDateTime.now())
+                    .mentions(new ArrayList<>())
+                    .reactions(new HashMap<>())
+                    .readers(new ArrayList<>())
+                    .metadata(new HashMap<>())
+                    .build();
 
             joinMessage = messageRepository.save(joinMessage);
 
-            // 초기 메시지 로드
             FetchMessagesRequest req = new FetchMessagesRequest(roomId, 30, null);
             FetchMessagesResponse messageLoadResult = messageLoader.loadMessages(req, userId);
 
-            // 업데이트된 room 다시 조회하여 최신 participantIds 가져오기
             Optional<Room> roomOpt = roomRepository.findById(roomId);
             if (roomOpt.isEmpty()) {
-                client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "채팅방을 찾을 수 없습니다."));
+                client.sendEvent(JOIN_ROOM_ERROR, Map.of("message", "Room not found"));
                 return;
             }
 
-            // 참가자 정보 조회
-            List<UserResponse> participants = roomOpt.get().getParticipantIds()
-                    .stream()
-                    .map(userRepository::findById)
-                    .filter(Optional::isPresent)
-                    .map(Optional::get)
-                    .map(UserResponse::from)
-                    .toList();
-            
+            List<UserResponse> participants = loadParticipants(roomOpt.get().getParticipantIds());
+
             JoinRoomSuccessResponse response = JoinRoomSuccessResponse.builder()
-                .roomId(roomId)
-                .participants(participants)
-                .messages(messageLoadResult.getMessages())
-                .hasMore(messageLoadResult.isHasMore())
-                .activeStreams(Collections.emptyList())
-                .build();
+                    .roomId(roomId)
+                    .participants(participants)
+                    .messages(messageLoadResult.getMessages())
+                    .hasMore(messageLoadResult.isHasMore())
+                    .activeStreams(Collections.emptyList())
+                    .build();
 
             client.sendEvent(JOIN_ROOM_SUCCESS, response);
 
-            // 입장 메시지 브로드캐스트
             socketIOServer.getRoomOperations(roomId)
-                .sendEvent(MESSAGE, messageResponseMapper.mapToMessageResponse(joinMessage, null));
+                    .sendEvent(MESSAGE, messageResponseMapper.mapToMessageResponse(joinMessage, null));
 
-            // 참가자 목록 업데이트 브로드캐스트
-            socketIOServer.getRoomOperations(roomId)
-                .sendEvent(PARTICIPANTS_UPDATE, participants);
+            scheduleParticipantsUpdate(roomId, participants);
 
             log.info("User {} joined room {} successfully. Message count: {}, hasMore: {}",
-                userName, roomId, messageLoadResult.getMessages().size(), messageLoadResult.isHasMore());
+                    userName, roomId, messageLoadResult.getMessages().size(), messageLoadResult.isHasMore());
 
         } catch (Exception e) {
             log.error("Error handling joinRoom", e);
             client.sendEvent(JOIN_ROOM_ERROR, Map.of(
-                "message", e.getMessage() != null ? e.getMessage() : "채팅방 입장에 실패했습니다."
+                    "message", e.getMessage() != null ? e.getMessage() : "Failed to join room."
             ));
         }
     }
-    
+
     private SocketUser getUser(SocketIOClient client) {
         return client.get("user");
     }
@@ -151,5 +179,52 @@ public class RoomJoinHandler {
     private String getUserName(SocketIOClient client) {
         SocketUser user = getUser(client);
         return user != null ? user.name() : null;
+    }
+
+    private List<UserResponse> loadParticipants(Collection<String> participantIds) {
+        if (participantIds == null || participantIds.isEmpty()) {
+            return List.of();
+        }
+        Map<String, User> usersById = StreamSupport.stream(userRepository.findAllById(participantIds).spliterator(), false)
+                .collect(Collectors.toMap(
+                        User::getId,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
+        return participantIds.stream()
+                .map(usersById::get)
+                .filter(Objects::nonNull)
+                .map(UserResponse::from)
+                .toList();
+    }
+
+    private void scheduleParticipantsUpdate(String roomId, List<UserResponse> participants) {
+        pendingParticipantUpdates.put(roomId, List.copyOf(participants));
+        if (scheduledParticipantUpdates.add(roomId)) {
+            participantUpdateExecutor.schedule(
+                    () -> flushParticipantsUpdate(roomId),
+                    PARTICIPANT_UPDATE_DEBOUNCE_MILLIS,
+                    TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void flushParticipantsUpdate(String roomId) {
+        try {
+            List<UserResponse> participants = pendingParticipantUpdates.remove(roomId);
+            if (participants != null) {
+                socketIOServer.getRoomOperations(roomId)
+                        .sendEvent(PARTICIPANTS_UPDATE, participants);
+            }
+        } finally {
+            scheduledParticipantUpdates.remove(roomId);
+            if (pendingParticipantUpdates.containsKey(roomId)) {
+                scheduleParticipantsUpdate(roomId, pendingParticipantUpdates.get(roomId));
+            }
+        }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        participantUpdateExecutor.shutdownNow();
     }
 }

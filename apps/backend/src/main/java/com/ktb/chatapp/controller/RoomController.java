@@ -20,9 +20,14 @@ import jakarta.validation.Valid;
 import java.security.Principal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -276,24 +281,22 @@ public class RoomController {
     }
 
     private RoomResponse mapToRoomResponse(Room room, String name) {
-        User creator = userRepository.findById(room.getCreator()).orElse(null);
+        LinkedHashSet<String> responseUserIds = new LinkedHashSet<>(room.getParticipantIds());
+        responseUserIds.add(room.getCreator());
+        Map<String, User> usersById = loadUsersById(responseUserIds);
+        User creator = usersById.get(room.getCreator());
         if (creator == null) {
             throw new RuntimeException("Creator not found for room " + room.getId());
         }
         UserResponse creatorSummary = UserResponse.from(creator);
         List<UserResponse> participantSummaries = room.getParticipantIds()
                 .stream()
-                .map(userRepository::findById).peek(optUser -> {
-                    if (optUser.isEmpty()) {
-                        log.warn("Participant not found: roomId={}, userId={}", room.getId(), optUser);
-                    }
-                })
-                .filter(Optional::isPresent)
-                .map(Optional::get)
+                .map(usersById::get)
+                .filter(java.util.Objects::nonNull)
                 .map(UserResponse::from)
                 .toList();
 
-        boolean isCreator = room.getCreator().equals(name);
+        boolean isCreator = room.getCreator().equals(name) || creator.getEmail().equalsIgnoreCase(name);
 
         int recentMessageCount = recentMessageCounter.countRecentMessages(room.getId());
 
@@ -307,5 +310,21 @@ public class RoomController {
                 .isCreator(isCreator)
                 .recentMessageCount((int) recentMessageCount)
                 .build();
+    }
+
+    private Map<String, User> loadUsersById(Collection<String> userIds) {
+        LinkedHashSet<String> uniqueIds = userIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (uniqueIds.isEmpty()) {
+            return Map.of();
+        }
+        return userRepository.findAllById(uniqueIds)
+                .stream()
+                .collect(Collectors.toMap(
+                        User::getId,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new));
     }
 }

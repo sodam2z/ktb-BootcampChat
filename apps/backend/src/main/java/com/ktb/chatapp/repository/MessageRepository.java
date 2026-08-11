@@ -35,4 +35,7 @@ public interface MessageRepository extends MongoRepository<Message, String> {
      * fileId로 메시지 조회 (파일 권한 검증용)
      */
     Optional<Message> findByFileId(String fileId);
+
+    @Query(value = "{ '_id': ?0 }", fields = "{ 'room': 1 }")
+    Optional<Message> findRoomOnlyById(String messageId);
 }

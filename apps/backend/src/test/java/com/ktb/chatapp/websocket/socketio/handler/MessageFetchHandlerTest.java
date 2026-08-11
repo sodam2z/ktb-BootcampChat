@@ -3,12 +3,9 @@ package com.ktb.chatapp.websocket.socketio.handler;
 import com.corundumstudio.socketio.SocketIOClient;
 import com.ktb.chatapp.dto.FetchMessagesRequest;
 import com.ktb.chatapp.dto.FetchMessagesResponse;
-import com.ktb.chatapp.model.Room;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,11 +52,9 @@ class MessageFetchHandlerTest {
                 .messages(List.of())
                 .hasMore(false)
                 .build();
-        Room room = Room.builder().id("room-1").participantIds(Set.of("user-1")).build();
-
         when(client.get("user"))
                 .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
-        when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
+        when(roomRepository.existsByIdAndParticipantIdsContaining("room-1", "user-1")).thenReturn(true);
         when(messageLoader.loadMessages(request, "user-1")).thenReturn(response);
 
         handler.handleFetchMessages(client, request);

@@ -30,9 +30,9 @@ public class MessageReadStatusService {
      * @param messageIds 읽음 상태를 업데이트할 메시지 리스트
      * @param userId 읽은 사용자 ID
      */
-    public void updateReadStatus(List<String> messageIds, String userId) {
+    public long updateReadStatus(List<String> messageIds, String userId) {
         if (messageIds.isEmpty()) {
-            return;
+            return 0;
         }
 
         var readerInfo = Message.MessageReader.builder()
@@ -63,6 +63,7 @@ public class MessageReadStatusService {
                     result.getModifiedCount(),
                     userId
             );
+            return result.getModifiedCount();
 
         } catch (Exception e) {
             log.error(
@@ -70,6 +71,7 @@ public class MessageReadStatusService {
                     userId,
                     e
             );
+            return 0;
         }
     }
 }

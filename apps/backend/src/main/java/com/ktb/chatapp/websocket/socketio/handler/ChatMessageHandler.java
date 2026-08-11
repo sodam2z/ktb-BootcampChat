@@ -11,6 +11,7 @@ import com.ktb.chatapp.dto.UserResponse;
 import com.ktb.chatapp.model.*;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
+import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.util.BannedWordChecker;
 import com.ktb.chatapp.websocket.socketio.ai.AiService;
 import com.ktb.chatapp.service.RoomActivityNotifier;
@@ -48,6 +49,7 @@ public class ChatMessageHandler {
     private final BannedWordChecker bannedWordChecker;
     private final RateLimitService rateLimitService;
     private final UserRooms userRooms;
+    private final RoomRepository roomRepository;
     private final MeterRegistry meterRegistry;
     private final Map<String, Timer> processingTimers = new ConcurrentHashMap<>();
     private final Map<String, Counter> successCounters = new ConcurrentHashMap<>();
@@ -111,7 +113,7 @@ public class ChatMessageHandler {
         
         try {
             String roomId = data.getRoom();
-            if (!userRooms.isInRoom(socketUser.id(), roomId)) {
+            if (!hasRoomAccess(socketUser.id(), roomId)) {
                 recordError("room_access_denied");
                 client.sendEvent(ERROR, Map.of(
                     "code", "MESSAGE_ERROR",
@@ -137,11 +139,12 @@ public class ChatMessageHandler {
             }
 
             String messageType = data.getMessageType();
-            Message message = switch (messageType) {
+            MessageBuildResult buildResult = switch (messageType) {
                 case "file" -> handleFileMessage(roomId, socketUser.id(), messageContent, data.getFileData());
-                case "text" -> handleTextMessage(roomId, socketUser.id(), messageContent);
+                case "text" -> new MessageBuildResult(handleTextMessage(roomId, socketUser.id(), messageContent), null);
                 default -> throw new IllegalArgumentException("Unsupported message type: " + messageType);
             };
+            Message message = buildResult.message();
 
             if (message == null) {
                 log.warn("Empty message - ignoring. room: {}, userId: {}, messageType: {}", roomId, socketUser.id(), messageType);
@@ -150,7 +153,7 @@ public class ChatMessageHandler {
             }
 
             Message savedMessage = messageRepository.save(message);
-            MessageResponse messageResponse = createMessageResponse(savedMessage, socketUser);
+            MessageResponse messageResponse = createMessageResponse(savedMessage, socketUser, buildResult.file());
 
             socketIOServer.getRoomOperations(roomId)
                     .sendEvent(MESSAGE, messageResponse);
@@ -180,7 +183,17 @@ public class ChatMessageHandler {
         }
     }
 
-    private Message handleFileMessage(String roomId, String userId, MessageContent messageContent, Map<String, Object> fileData) {
+    private boolean hasRoomAccess(String userId, String roomId) {
+        if (roomId == null || roomId.isBlank()) {
+            return false;
+        }
+        if (userRooms.isInRoom(userId, roomId)) {
+            return true;
+        }
+        return roomRepository.existsByIdAndParticipantIdsContaining(roomId, userId);
+    }
+
+    private MessageBuildResult handleFileMessage(String roomId, String userId, MessageContent messageContent, Map<String, Object> fileData) {
         if (fileData == null || fileData.get("_id") == null) {
             throw new IllegalArgumentException("파일 데이터가 올바르지 않습니다.");
         }
@@ -208,7 +221,7 @@ public class ChatMessageHandler {
         metadata.put("originalName", file.getOriginalname());
         message.setMetadata(metadata);
 
-        return message;
+        return new MessageBuildResult(message, file);
     }
 
     private Message handleTextMessage(String roomId, String userId, MessageContent messageContent) {
@@ -227,7 +240,7 @@ public class ChatMessageHandler {
         return message;
     }
 
-    private MessageResponse createMessageResponse(Message message, SocketUser sender) {
+    private MessageResponse createMessageResponse(Message message, SocketUser sender, File knownFile) {
         var messageResponse = new MessageResponse();
         messageResponse.setId(message.getId());
         messageResponse.setRoomId(message.getRoomId());
@@ -238,12 +251,17 @@ public class ChatMessageHandler {
         messageResponse.setSender(UserResponse.from(sender));
         messageResponse.setMetadata(message.getMetadata());
 
-        if (message.getFileId() != null) {
+        if (knownFile != null) {
+            messageResponse.setFile(FileResponse.from(knownFile));
+        } else if (message.getFileId() != null) {
             fileRepository.findById(message.getFileId())
                     .ifPresent(file -> messageResponse.setFile(FileResponse.from(file)));
         }
 
         return messageResponse;
+    }
+
+    private record MessageBuildResult(Message message, File file) {
     }
 
     // Metrics helper methods

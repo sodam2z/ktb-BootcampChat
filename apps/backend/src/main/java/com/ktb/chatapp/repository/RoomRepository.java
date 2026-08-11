@@ -22,6 +22,8 @@ public interface RoomRepository extends MongoRepository<Room, String> {
 
     List<Room> findByParticipantIdsContaining(String userId);
 
+    boolean existsByIdAndParticipantIdsContaining(String roomId, String userId);
+
     @Query("{'_id': ?0}")
     @Update("{'$addToSet': {'participantIds': ?1}}")
     long addParticipant(String roomId, String userId);

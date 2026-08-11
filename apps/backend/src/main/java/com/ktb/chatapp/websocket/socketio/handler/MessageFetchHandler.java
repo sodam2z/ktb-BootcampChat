@@ -4,7 +4,6 @@ import com.corundumstudio.socketio.SocketIOClient;
 import com.corundumstudio.socketio.annotation.OnEvent;
 import com.ktb.chatapp.dto.FetchMessagesRequest;
 import com.ktb.chatapp.dto.FetchMessagesResponse;
-import com.ktb.chatapp.model.Room;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import lombok.RequiredArgsConstructor;
@@ -42,8 +41,7 @@ public class MessageFetchHandler {
         
         try {
             // 권한 체크
-            Room room = roomRepository.findById(data.roomId()).orElse(null);
-            if (room == null || !room.getParticipantIds().contains(userId)) {
+            if (!roomRepository.existsByIdAndParticipantIdsContaining(data.roomId(), userId)) {
                 client.sendEvent(ERROR, Map.of(
                         "code", "LOAD_ERROR",
                         "message", "채팅방 접근 권한이 없습니다."

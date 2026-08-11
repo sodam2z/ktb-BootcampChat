@@ -31,6 +31,7 @@ import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.MESSAGE;
 import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.PARTICIPANTS_UPDATE;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,8 +91,8 @@ class RoomJoinHandlerTest {
                 .build();
 
         when(client.get("user")).thenReturn(socketUser);
-        when(userRepository.findById("user-1")).thenReturn(Optional.of(user));
         when(roomRepository.findById("room-1")).thenReturn(Optional.of(room));
+        when(userRepository.findAllById(Set.of("user-1"))).thenReturn(List.of(user));
         when(roomRepository.addParticipant("room-1", "user-1")).thenReturn(1L);
         when(messageRepository.save(any(Message.class))).thenAnswer(invocation -> {
             Message message = invocation.getArgument(0);
@@ -112,6 +113,6 @@ class RoomJoinHandlerTest {
         verify(userRooms).add("user-1", "room-1");
         verify(client).sendEvent(eq(JOIN_ROOM_SUCCESS), any());
         verify(roomOperations).sendEvent(MESSAGE, joinMessageResponse);
-        verify(roomOperations).sendEvent(eq(PARTICIPANTS_UPDATE), any());
+        verify(roomOperations, timeout(1000)).sendEvent(eq(PARTICIPANTS_UPDATE), any());
     }
 }

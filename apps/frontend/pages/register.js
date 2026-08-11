@@ -53,7 +53,7 @@ const Register = () => {
       await registerContext({ name, email, password });
       
       setSuccess(true);
-      await router.replace('/login');
+      await router.replace('/');
     } catch (err) {
       setError(err.message || '회원가입 처리 중 오류가 발생했습니다.');
       setLoading(false);

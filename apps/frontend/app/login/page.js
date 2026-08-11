@@ -1,17 +1,18 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+const LoginRedirectPage = async ({ searchParams }) => {
+  const params = new URLSearchParams();
 
-const LoginRedirectPage = () => {
-  const router = useRouter();
+  for (const [key, value] of Object.entries((await searchParams) ?? {})) {
+    if (Array.isArray(value)) {
+      value.forEach((item) => params.append(key, item));
+    } else if (value !== undefined) {
+      params.append(key, value);
+    }
+  }
 
-  useEffect(() => {
-    const queryString = window.location.search;
-    router.replace(queryString ? `/${queryString}` : '/');
-  }, [router]);
-
-  return null;
+  const queryString = params.toString();
+  redirect(queryString ? `/?${queryString}` : '/');
 };
 
 export default LoginRedirectPage;

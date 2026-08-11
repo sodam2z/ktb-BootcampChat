@@ -47,6 +47,24 @@ describe('api client', () => {
     expect(readHeader(response.config.headers, 'x-session-id')).toBe('session-1');
   });
 
+  it('does not retry requests marked with skipRetry', async () => {
+    const client = createApiClient({ baseURL: 'http://api.test', getSession: () => null });
+    let attempts = 0;
+
+    client.defaults.adapter = async (config) => {
+      attempts++;
+      const error = new Error('Gateway Timeout');
+      error.config = config;
+      error.response = { config, data: {}, headers: {}, status: 504, statusText: 'Gateway Timeout' };
+      throw error;
+    };
+
+    await expect(client.post('/api/auth/login', {}, { skipRetry: true })).rejects.toMatchObject({
+      status: 504,
+    });
+    expect(attempts).toBe(1);
+  });
+
   it('respects skipAuth requests', async () => {
     const client = createApiClient({
       baseURL: 'http://api.test',

@@ -60,7 +60,6 @@ export default function ChatRoomsView({ router }) {
     connectionStatus,
     setConnectionStatus,
     isRetrying,
-    attemptConnection,
   });
 
   const connectionCheckTimerRef = useRef(null);
@@ -109,6 +108,7 @@ export default function ChatRoomsView({ router }) {
   useEffect(() => {
     if (!currentUserKey || connectionStatus !== CONNECTION_STATUS.CHECKING) return;
 
+    attemptConnection();
     connectionCheckTimerRef.current = setInterval(() => {
       attemptConnection();
     }, 5000);

@@ -45,6 +45,10 @@ public class File {
     @CreatedDate
     private LocalDateTime uploadDate;
 
+    @Builder.Default
+    @Field("deleted")
+    private boolean deleted = false;
+
     /**
      * 미리보기 지원 여부 확인
      */

@@ -2,6 +2,7 @@ import { createContext, useState, useEffect, useCallback, useRef, useContext } f
 import { useRouter } from 'next/router';
 import socketService from '../services/socket';
 import authService from '../services/authService';
+import AuthRequiredFallback from '../components/AuthRequiredFallback';
 import api, { getAuthHeaders } from '../lib/api/client';
 import {
   clearStoredUser,
@@ -285,12 +286,16 @@ export const withAuth = (WrappedComponent) => {
     useEffect(() => {
       // 로딩이 끝나고 인증되지 않은 경우 리다이렉트
       if (!isLoading && !isAuthenticated) {
-        router.replace('/?redirect=' + router.asPath);
+        const redirectTimer = window.setTimeout(() => {
+          router.replace('/?redirect=' + router.asPath);
+        }, 100);
+
+        return () => window.clearTimeout(redirectTimer);
       }
     }, [isAuthenticated, isLoading, router]);
 
     // 로딩 중이거나 인증되지 않은 경우 로딩 화면 표시
-    if (isLoading || !isAuthenticated) {
+    if (isLoading) {
       return (
         <div style={{
           display: 'flex',
@@ -303,6 +308,10 @@ export const withAuth = (WrappedComponent) => {
           <div>Loading...</div>
         </div>
       );
+    }
+
+    if (!isAuthenticated) {
+      return <AuthRequiredFallback />;
     }
 
     return <WrappedComponent {...props} />;

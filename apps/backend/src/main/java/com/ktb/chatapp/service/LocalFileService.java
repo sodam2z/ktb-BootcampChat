@@ -104,28 +104,36 @@ public class LocalFileService implements FileService {
     }
 
     @Override
-    public boolean deleteFile(String fileId, String requesterId) {
-        try {
-            File fileEntity = fileRepository.findById(fileId)
-                    .orElseThrow(() -> new RuntimeException("파일을 찾을 수 없습니다."));
+    public boolean deleteFile(
+            String fileId,
+            String requesterId
+    ) {
+        File fileEntity = fileRepository.findById(fileId)
+                .orElseThrow(() ->
+                        new RuntimeException(
+                                "파일을 찾을 수 없습니다."
+                        )
+                );
 
-            // 삭제 권한 검증 (업로더만 삭제 가능)
-            if (!fileEntity.getUser().equals(requesterId)) {
-                throw new RuntimeException("파일을 삭제할 권한이 없습니다.");
-            }
-
-            // 물리적 파일 삭제
-            storagePort.delete(fileEntity.getPath());
-
-            // 데이터베이스에서 제거
-            fileRepository.delete(fileEntity);
-
-            log.info("파일 삭제 완료: {} (사용자: {})", fileId, requesterId);
-            return true;
-
-        } catch (Exception e) {
-            log.error("파일 삭제 실패: {}", e.getMessage(), e);
-            throw new RuntimeException("파일 삭제 중 오류가 발생했습니다.", e);
+        if (!fileEntity.getUser().equals(requesterId)) {
+            throw new RuntimeException(
+                    "파일을 삭제할 권한이 없습니다."
+            );
         }
+
+        if (fileEntity.isDeleted()) {
+            return true;
+        }
+
+        fileEntity.setDeleted(true);
+        fileRepository.save(fileEntity);
+
+        log.info(
+                "파일 soft delete 완료: {} (사용자: {})",
+                fileId,
+                requesterId
+        );
+
+        return true;
     }
 }

@@ -19,6 +19,14 @@ public final class StorageKey {
         return CHAT_PREFIX + fileName;
     }
 
+    public static String chat(String userId, String fileName) {
+        return CHAT_PREFIX + userId + "/" + fileName;
+    }
+
+    public static String chatUserPrefix(String userId) {
+        return CHAT_PREFIX + userId + "/";
+    }
+
     public static boolean isProfile(String key) {
         return key != null && key.startsWith(PROFILE_PREFIX);
     }

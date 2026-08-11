@@ -7,6 +7,7 @@ import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.storage.StoragePort;
+import com.ktb.chatapp.exception.DeletedFileException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -35,17 +36,47 @@ public class FileAccessService {
     private final FileRepository fileRepository;
     private final MessageRepository messageRepository;
     private final RoomRepository roomRepository;
+    private final Optional<CloudFrontSignedUrlService>
+            cloudFrontSignedUrlService;
 
     public FileAccess forDownload(String fileName, String requesterId) {
         return issue(authorize(fileName, requesterId), Delivery.ATTACHMENT, fileName, requesterId);
     }
 
-    public FileAccess forView(String fileName, String requesterId) {
-        File fileEntity = authorize(fileName, requesterId);
+    public FileAccess forView(
+            String fileName,
+            String requesterId
+    ) {
+        File fileEntity =
+                authorize(fileName, requesterId);
+
         if (!fileEntity.isPreviewable()) {
-            throw new PreviewNotSupportedException("미리보기를 지원하지 않는 파일 형식입니다.");
+            throw new PreviewNotSupportedException(
+                    "미리보기를 지원하지 않는 파일 형식입니다."
+            );
         }
-        return issue(fileEntity, Delivery.INLINE, fileName, requesterId);
+
+        if (cloudFrontSignedUrlService.isPresent()) {
+            URI signedUrl =
+                    cloudFrontSignedUrlService
+                            .get()
+                            .sign(fileEntity.getPath());
+
+            log.info(
+                    "CloudFront signed URL 발급: {} (사용자: {})",
+                    fileName,
+                    requesterId
+            );
+
+            return new FileAccess.Redirect(signedUrl);
+        }
+
+        return issue(
+                fileEntity,
+                Delivery.INLINE,
+                fileName,
+                requesterId
+        );
     }
 
     /**
@@ -67,6 +98,10 @@ public class FileAccessService {
         // 1. 파일 조회
         File fileEntity = fileRepository.findByFilename(fileName)
                 .orElseThrow(() -> new RuntimeException("파일을 찾을 수 없습니다: " + fileName));
+
+        if (fileEntity.isDeleted()) {
+            throw new DeletedFileException();
+        }
 
         // 2. 메시지 조회 (파일과 메시지 연결 확인) - 효율적인 쿼리 메서드 사용
         Message message = messageRepository.findByFileId(fileEntity.getId())

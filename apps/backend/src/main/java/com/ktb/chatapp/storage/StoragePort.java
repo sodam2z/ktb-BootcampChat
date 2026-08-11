@@ -20,4 +20,16 @@ public interface StoragePort {
     default Optional<URI> offloadUrl(String key, Duration ttl, ContentDisposition disposition) {
         return Optional.empty();
     }
+
+    default Optional<URI> presignUploadUrl(
+            String key,
+            String contentType,
+            Duration ttl
+    ) {
+        return Optional.empty();
+    }
+
+    default Optional<StoredObjectMetadata> stat(String key) {
+        return Optional.empty();
+    }
 }

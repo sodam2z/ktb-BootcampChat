@@ -188,7 +188,7 @@ class FileAccessServiceTest {
     void forDownload_missingFileEntity_throwsNotFound() {
         when(fileRepository.findByFilename(FILE_NAME)).thenReturn(Optional.empty());
         FileAccessService service = new FileAccessService(
-                new DirectStorage(), fileRepository, messageRepository, roomRepository);
+                new DirectStorage(), fileRepository, messageRepository, roomRepository, Optional.empty());
 
         assertThatThrownBy(() -> service.forDownload(FILE_NAME, PARTICIPANT))
                 .hasMessage("파일을 찾을 수 없습니다: " + FILE_NAME);
@@ -211,7 +211,7 @@ class FileAccessServiceTest {
                 Message.builder().id("message-id").roomId(ROOM_ID).fileId(FILE_ID).build()));
         when(roomRepository.findById(ROOM_ID)).thenReturn(Optional.of(
                 Room.builder().id(ROOM_ID).participantIds(Set.of(PARTICIPANT)).build()));
-        return new FileAccessService(storagePort, fileRepository, messageRepository, roomRepository);
+        return new FileAccessService(storagePort, fileRepository, messageRepository, roomRepository, Optional.empty());
     }
 
     private File fileEntity(String mimetype) {

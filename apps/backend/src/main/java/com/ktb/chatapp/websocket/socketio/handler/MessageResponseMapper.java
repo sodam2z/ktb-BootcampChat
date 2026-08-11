@@ -63,6 +63,7 @@ public class MessageResponseMapper {
                         .originalname(file.getOriginalname())
                         .mimetype(file.getMimetype())
                         .size(file.getSize())
+                        .deleted(file.isDeleted())
                         .build())
                 .ifPresent(builder::file);
 

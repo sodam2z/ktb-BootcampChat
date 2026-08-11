@@ -37,9 +37,6 @@ public class SessionService {
 
     public SessionCreationResult createSession(String userId, SessionMetadata metadata) {
         try {
-            // Remove all existing user sessions
-            removeAllUserSessions(userId);
-
             String sessionId = generateSessionId();
             long now = Instant.now().toEpochMilli();
             
@@ -52,7 +49,7 @@ public class SessionService {
                     .expiresAt(Instant.now().plusSeconds(SESSION_TTL_SEC))
                     .build();
 
-            session = sessionStore.save(session);
+            session = sessionStore.replaceByUserId(session);
             
             SessionData sessionData = toSessionData(session);
 

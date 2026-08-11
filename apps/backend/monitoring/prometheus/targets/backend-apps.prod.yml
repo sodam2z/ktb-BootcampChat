@@ -5,10 +5,7 @@
 
 # App Server (Spring Boot actuator)
 - targets:
-    - 'IP:5001'  # your-app-server1
-    - 'IP:5001'  # your-app-server2
-    - 'IP:5001'  # your-app-server3
-    - 'IP:5001'  # your-app-server4
+    - '10.0.101.47:5001'  # ktb-backend
   labels:
     application: 'ktb-chat-backend'
     environment: 'production'

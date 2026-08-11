@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -25,6 +26,8 @@ public class File {
     @Id
     private String id;
 
+    // 파일 조회 API는 저장된 filename으로 메타데이터를 찾으므로 다운로드/미리보기 지연을 줄인다.
+    @Indexed(name = "filename_idx")
     private String filename;
 
     private String originalname;

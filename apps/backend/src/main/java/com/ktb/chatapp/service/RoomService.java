@@ -10,9 +10,11 @@ import com.ktb.chatapp.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -35,27 +37,39 @@ public class RoomService {
 
         try {
             // 전체 방을 조회해 최신순으로 정렬한다
-            List<RoomResponse> roomResponses = roomRepository.findAll().stream()
-                .map(room -> mapToRoomResponse(room, name))
+            List<Room> rooms = roomRepository.findAll();
+            if (rooms.isEmpty()) {
+                return successfulRoomsResponse(List.of());
+            }
+
+            Set<String> userIds = new HashSet<>();
+            Set<String> roomIds = new HashSet<>();
+            for (Room room : rooms) {
+                if (room.getId() != null) {
+                    roomIds.add(room.getId());
+                }
+                if (room.getCreator() != null) {
+                    userIds.add(room.getCreator());
+                }
+                if (room.getParticipantIds() != null) {
+                    userIds.addAll(room.getParticipantIds());
+                }
+            }
+
+            Map<String, User> usersById = new HashMap<>();
+            userRepository.findAllById(userIds)
+                .forEach(user -> usersById.put(user.getId(), user));
+            Map<String, Integer> recentMessageCounts =
+                recentMessageCounter.countRecentMessagesByRoomIds(roomIds);
+
+            List<RoomResponse> roomResponses = rooms.stream()
+                .map(room -> mapToRoomResponse(room, name, usersById, recentMessageCounts))
                 .sorted(Comparator.comparing(
                     RoomResponse::getCreatedAtDateTime,
                     Comparator.nullsLast(Comparator.reverseOrder())))
                 .collect(Collectors.toList());
 
-            PageMetadata metadata = PageMetadata.builder()
-                .total(roomResponses.size())
-                .page(0)
-                .pageSize(roomResponses.size())
-                .totalPages(1)
-                .hasMore(false)
-                .currentCount(roomResponses.size())
-                .build();
-
-            return RoomsResponse.builder()
-                .success(true)
-                .data(roomResponses)
-                .metadata(metadata)
-                .build();
+            return successfulRoomsResponse(roomResponses);
 
         } catch (Exception e) {
             log.error("방 목록 조회 에러", e);
@@ -194,6 +208,33 @@ public class RoomService {
 
         int recentMessageCount = recentMessageCounter.countRecentMessages(room.getId());
 
+        return buildRoomResponse(room, name, creator, participants, recentMessageCount);
+    }
+
+    private RoomResponse mapToRoomResponse(
+            Room room,
+            String name,
+            Map<String, User> usersById,
+            Map<String, Integer> recentMessageCounts) {
+        User creator = usersById.get(room.getCreator());
+        List<User> participants = room.getParticipantIds() == null
+            ? List.of()
+            : room.getParticipantIds().stream()
+                .map(usersById::get)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        int recentMessageCount = recentMessageCounts.getOrDefault(room.getId(), 0);
+
+        return buildRoomResponse(room, name, creator, participants, recentMessageCount);
+    }
+
+    private RoomResponse buildRoomResponse(
+            Room room,
+            String name,
+            User creator,
+            List<User> participants,
+            int recentMessageCount) {
+
         return RoomResponse.builder()
             .id(room.getId())
             .name(room.getName() != null ? room.getName() : "제목 없음")
@@ -214,6 +255,23 @@ public class RoomService {
             .createdAtDateTime(room.getCreatedAt())
             .isCreator(creator != null && creator.getId().equals(name))
             .recentMessageCount(recentMessageCount)
+            .build();
+    }
+
+    private RoomsResponse successfulRoomsResponse(List<RoomResponse> roomResponses) {
+        PageMetadata metadata = PageMetadata.builder()
+            .total(roomResponses.size())
+            .page(0)
+            .pageSize(roomResponses.size())
+            .totalPages(1)
+            .hasMore(false)
+            .currentCount(roomResponses.size())
+            .build();
+
+        return RoomsResponse.builder()
+            .success(true)
+            .data(roomResponses)
+            .metadata(metadata)
             .build();
     }
 }

@@ -1,12 +1,21 @@
 package com.ktb.chatapp.service;
 
 import com.ktb.chatapp.config.MongoTestContainer;
+import com.ktb.chatapp.model.Session;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.test.context.TestPropertySource;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,6 +36,9 @@ class SessionServiceTest {
 
     @Autowired
     private SessionService sessionService;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     private static final String TEST_USER_ID = "test-user-123";
     private static final String TEST_USER_ID_2 = "test-user-456";
@@ -70,8 +82,8 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("세션 생성 시 기존 세션 제거")
-    void createSession_RemovesExistingSession() {
+    @DisplayName("세션 생성 시 기존 세션 교체")
+    void createSession_ReplacesExistingSession() {
         // Given - 첫 번째 세션 생성
         SessionMetadata metadata = createTestMetadata();
         SessionCreationResult firstSession = sessionService.createSession(TEST_USER_ID, metadata);
@@ -299,6 +311,42 @@ class SessionServiceTest {
     }
 
     // ============ 동시성 및 멀티 사용자 테스트 ============
+
+    @Test
+    @DisplayName("동일 사용자의 동시 세션 생성은 한 문서만 유지한다")
+    void createSession_ConcurrentSameUser_KeepsSingleDocument() throws Exception {
+        int attempts = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(attempts);
+        List<Callable<SessionCreationResult>> tasks = java.util.stream.IntStream.range(0, attempts)
+                .mapToObj(index -> (Callable<SessionCreationResult>) () ->
+                        sessionService.createSession(TEST_USER_ID, createTestMetadata()))
+                .toList();
+
+        try {
+            List<Future<SessionCreationResult>> futures = executor.invokeAll(tasks);
+            List<String> issuedSessionIds = futures.stream()
+                    .map(future -> {
+                        try {
+                            return future.get().getSessionId();
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    })
+                    .toList();
+
+            long storedSessions = mongoTemplate.count(
+                    Query.query(Criteria.where("userId").is(TEST_USER_ID)),
+                    Session.class
+            );
+            SessionData activeSession = sessionService.getActiveSession(TEST_USER_ID);
+
+            assertEquals(1L, storedSessions);
+            assertNotNull(activeSession);
+            assertTrue(issuedSessionIds.contains(activeSession.getSessionId()));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
 
     @Test
     @DisplayName("여러 사용자의 독립적인 세션 관리")

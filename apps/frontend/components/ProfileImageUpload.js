@@ -73,6 +73,9 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
         '/api/users/profile-image',
         formData,
         {
+          // 파일 업로드는 서버에 저장된 뒤 응답만 유실될 수 있으므로 자동 재시도하지 않는다.
+          // 재시도는 중복 객체와 추가 부하를 만들 수 있다.
+          skipRetry: true,
           headers: {
             'Content-Type': 'multipart/form-data',
           },

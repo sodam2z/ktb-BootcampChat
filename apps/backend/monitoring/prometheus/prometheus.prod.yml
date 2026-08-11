@@ -21,13 +21,13 @@ scrape_configs:
 
   - job_name: 'mongodb'
     static_configs:
-      - targets: ['IP:9216'] # your-mongo-server
+      - targets: ['10.0.101.238:9216'] # ktb-mongodb mongodb-exporter
         labels:
           environment: 'production'
 
   - job_name: 'redis'
     static_configs:
-      - targets: ['IP:9121'] # your-redis-server
+      - targets: ['10.0.101.175:9121'] # ktb-redis redis-exporter
         labels:
           environment: 'production'
 

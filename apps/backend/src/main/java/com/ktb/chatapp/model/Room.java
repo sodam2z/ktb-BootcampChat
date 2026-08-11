@@ -10,6 +10,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.IndexDirection;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
@@ -34,6 +36,8 @@ public class Room {
     @JsonIgnore
     private String password;
 
+    // Health Check가 최신 방 1개를 createdAt desc로 찾으므로 정렬 비용을 줄인다.
+    @Indexed(name = "created_at_desc_idx", direction = IndexDirection.DESCENDING)
     @CreatedDate
     private LocalDateTime createdAt;
 

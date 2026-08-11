@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
@@ -27,7 +29,8 @@ import java.util.Set;
 @NoArgsConstructor
 @AllArgsConstructor
 @Document(collection = "messages")
-@CompoundIndex(name = "messages_room_timestamp", def = "{'room': 1, 'timestamp': 1}")
+// 이전 메시지 조회와 최근 메시지 카운트가 room + timestamp 조건을 같이 쓰므로 컬렉션 스캔을 줄인다.
+@CompoundIndex(name = "room_timestamp_desc_idx", def = "{'room': 1, 'timestamp': -1}")
 public class Message {
 
     @Id
@@ -47,6 +50,8 @@ public class Message {
     private MessageType type;
 
     // Mongo 문서 필드명 "file" 사용
+    // 파일 다운로드 권한 검증은 fileId로 메시지를 역조회하므로 파일 메시지만 sparse index에 올린다.
+    @Indexed(name = "file_idx", sparse = true)
     @Field("file")
     private String fileId;
 

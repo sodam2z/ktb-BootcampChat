@@ -9,6 +9,7 @@ import com.ktb.chatapp.model.Message;
 import com.ktb.chatapp.model.MessageType;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
+import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.service.RateLimitCheckResult;
 import com.ktb.chatapp.service.RateLimitService;
 import com.ktb.chatapp.service.RoomActivityNotifier;
@@ -47,6 +48,7 @@ class ChatMessageHandlerTest {
     @Mock private BannedWordChecker bannedWordChecker;
     @Mock private RateLimitService rateLimitService;
     @Mock private UserRooms userRooms;
+    @Mock private RoomRepository roomRepository;
     private MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private ChatMessageHandler handler;
@@ -64,6 +66,7 @@ class ChatMessageHandlerTest {
                         bannedWordChecker,
                         rateLimitService,
                         userRooms,
+                        roomRepository,
                         meterRegistry);
     }
 
@@ -153,6 +156,7 @@ class ChatMessageHandlerTest {
                 .thenReturn(RateLimitCheckResult.allowed(10000, 9999, 60,
                         System.currentTimeMillis() / 1000 + 60, 60));
         when(userRooms.isInRoom("user-1", "room-1")).thenReturn(false);
+        when(roomRepository.existsByIdAndParticipantIdsContaining("room-1", "user-1")).thenReturn(false);
 
         handler.handleChatMessage(client, ChatMessageRequest.builder()
                 .room("room-1")

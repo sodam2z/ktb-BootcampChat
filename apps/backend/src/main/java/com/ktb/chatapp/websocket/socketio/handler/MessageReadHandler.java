@@ -6,13 +6,11 @@ import com.corundumstudio.socketio.annotation.OnEvent;
 import com.ktb.chatapp.dto.MarkAsReadRequest;
 import com.ktb.chatapp.dto.MessagesReadResponse;
 import com.ktb.chatapp.model.Message;
-import com.ktb.chatapp.model.Room;
-import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.RoomRepository;
-import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
+import com.ktb.chatapp.websocket.socketio.UserRooms;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,8 +32,8 @@ public class MessageReadHandler {
     private final SocketIOServer socketIOServer;
     private final MessageReadStatusService messageReadStatusService;
     private final MessageRepository messageRepository;
+    private final UserRooms userRooms;
     private final RoomRepository roomRepository;
-    private final UserRepository userRepository;
     
     @OnEvent(MARK_MESSAGES_AS_READ)
     public void handleMarkAsRead(SocketIOClient client, MarkAsReadRequest data) {
@@ -50,7 +48,7 @@ public class MessageReadHandler {
                 return;
             }
             
-            String roomId = messageRepository.findById(data.getMessageIds().getFirst())
+            String roomId = messageRepository.findRoomOnlyById(data.getMessageIds().getFirst())
                     .map(Message::getRoomId).orElse(null);
             
             if (roomId == null || roomId.isBlank()) {
@@ -58,19 +56,15 @@ public class MessageReadHandler {
                 return;
             }
 
-            User user = userRepository.findById(userId).orElse(null);
-            if (user == null) {
-                client.sendEvent(ERROR, Map.of("message", "User not found"));
-                return;
-            }
-
-            Room room = roomRepository.findById(roomId).orElse(null);
-            if (room == null || !room.getParticipantIds().contains(userId)) {
+            if (!hasRoomAccess(userId, roomId)) {
                 client.sendEvent(ERROR, Map.of("message", "Room access denied"));
                 return;
             }
             
-            messageReadStatusService.updateReadStatus(data.getMessageIds(), userId);
+            long modifiedCount = messageReadStatusService.updateReadStatus(data.getMessageIds(), userId);
+            if (modifiedCount == 0) {
+                return;
+            }
 
             MessagesReadResponse response = new MessagesReadResponse(userId, data.getMessageIds());
 
@@ -89,5 +83,12 @@ public class MessageReadHandler {
     private String getUserId(SocketIOClient client) {
         var user = (SocketUser) client.get("user");
         return user != null ? user.id() : null;
+    }
+
+    private boolean hasRoomAccess(String userId, String roomId) {
+        if (userRooms.isInRoom(userId, roomId)) {
+            return true;
+        }
+        return roomRepository.existsByIdAndParticipantIdsContaining(roomId, userId);
     }
 }

@@ -7,6 +7,7 @@ import com.ktb.chatapp.model.Room;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.repository.UserRepository;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -14,9 +15,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -36,8 +39,17 @@ public class RoomService {
     private final RecentMessageCounter recentMessageCounter;
     private final PasswordEncoder passwordEncoder;
     private final ApplicationEventPublisher eventPublisher;
+    private final Map<Integer, CachedRoomsResponse> roomListCache = new ConcurrentHashMap<>();
+
+    @Value("${rooms.list-cache-ttl:2s}")
+    private Duration roomListCacheTtl;
 
     public RoomsResponse getAllRooms(int page) {
+        long now = System.nanoTime();
+        CachedRoomsResponse cached = roomListCache.get(page);
+        if (cached != null && cached.expiresAtNanos() > now) {
+            return cached.response();
+        }
 
         try {
             PageRequest pageRequest = PageRequest.of(
@@ -63,7 +75,9 @@ public class RoomService {
                     recentMessageCounts.getOrDefault(room.getId(), 0)))
                 .toList();
 
-            return successfulRoomsResponse(roomResponses, roomPage);
+            RoomsResponse response = successfulRoomsResponse(roomResponses, roomPage);
+            cacheRoomsResponse(page, response, now);
+            return response;
 
         } catch (Exception e) {
             log.error("방 목록 조회 에러", e);
@@ -135,6 +149,7 @@ public class RoomService {
         }
 
         Room savedRoom = roomRepository.save(room);
+        roomListCache.clear();
         
         // Publish event for room created
         try {
@@ -220,5 +235,16 @@ public class RoomService {
             .data(roomResponses)
             .metadata(metadata)
             .build();
+    }
+
+    private void cacheRoomsResponse(int page, RoomsResponse response, long nowNanos) {
+        long ttlNanos = roomListCacheTtl != null ? roomListCacheTtl.toNanos() : 0;
+        if (ttlNanos <= 0) {
+            return;
+        }
+        roomListCache.put(page, new CachedRoomsResponse(response, nowNanos + ttlNanos));
+    }
+
+    private record CachedRoomsResponse(RoomsResponse response, long expiresAtNanos) {
     }
 }

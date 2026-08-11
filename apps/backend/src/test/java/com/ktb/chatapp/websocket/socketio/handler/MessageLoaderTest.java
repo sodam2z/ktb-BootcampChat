@@ -2,7 +2,9 @@ package com.ktb.chatapp.websocket.socketio.handler;
 
 import com.ktb.chatapp.dto.FetchMessagesRequest;
 import com.ktb.chatapp.dto.FetchMessagesResponse;
+import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.model.Message;
+import com.ktb.chatapp.model.MessageType;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
@@ -60,6 +62,7 @@ class MessageLoaderTest {
         messageLoader = new MessageLoader(
                 messageRepository,
                 userRepository,
+                fileRepository,
                 new MessageResponseMapper(fileRepository),
                 messageReadStatusService
         );
@@ -175,5 +178,37 @@ class MessageLoaderTest {
         
         assertThat(result.getMessages()).isEmpty();
         assertThat(result.isHasMore()).isFalse();
+    }
+
+    @Test
+    void loadMessages_shouldBatchLoadFilesForFileMessages() {
+        List<Message> fileMessages = testMessages.subList(0, 5).stream()
+                .peek(message -> {
+                    message.setType(MessageType.file);
+                    message.setFileId("file-" + message.getId());
+                })
+                .toList();
+        Page<Message> messagePage = getMessagePage(fileMessages);
+
+        when(messageRepository.findByRoomIdAndTimestampBefore(
+                eq(roomId), any(LocalDateTime.class), any(Pageable.class)))
+                .thenReturn(messagePage);
+
+        File file = File.builder()
+                .id("file-" + fileMessages.getFirst().getId())
+                .filename("chat-image.webp")
+                .originalname("chat-image.webp")
+                .mimetype("image/webp")
+                .size(1234L)
+                .build();
+        when(fileRepository.findAllById(anySet()))
+                .thenReturn(List.of(file));
+
+        FetchMessagesRequest req = new FetchMessagesRequest(roomId, 30, null);
+        FetchMessagesResponse result = messageLoader.loadMessages(req, userId);
+
+        assertThat(result.getMessages()).hasSize(5);
+        verify(fileRepository).findAllById(anySet());
+        verify(fileRepository, never()).findById(anyString());
     }
 }

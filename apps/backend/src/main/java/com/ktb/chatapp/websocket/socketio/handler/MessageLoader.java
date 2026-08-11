@@ -3,8 +3,10 @@ package com.ktb.chatapp.websocket.socketio.handler;
 import com.ktb.chatapp.dto.FetchMessagesRequest;
 import com.ktb.chatapp.dto.FetchMessagesResponse;
 import com.ktb.chatapp.dto.MessageResponse;
+import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.model.Message;
 import com.ktb.chatapp.model.User;
+import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
@@ -30,6 +32,7 @@ public class MessageLoader {
 
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final FileRepository fileRepository;
     private final MessageResponseMapper messageResponseMapper;
     private final MessageReadStatusService messageReadStatusService;
 
@@ -79,11 +82,23 @@ public class MessageLoader {
         userRepository.findAllById(senderIds)
                 .forEach(user -> usersById.put(user.getId(), user));
 
+        var fileIds = sortedMessages.stream()
+                .map(Message::getFileId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        var filesById = new HashMap<String, File>();
+        if (!fileIds.isEmpty()) {
+            fileRepository.findAllById(fileIds)
+                    .forEach(file -> filesById.put(file.getId(), file));
+        }
+
 // 메시지 응답 생성
         List<MessageResponse> messageResponses = sortedMessages.stream()
                 .map(message -> {
                     var user = usersById.get(message.getSenderId());
-                    return messageResponseMapper.mapToMessageResponse(message, user);
+                    var file = filesById.get(message.getFileId());
+                    return messageResponseMapper.mapToMessageResponse(message, user, file);
                 })
                 .collect(Collectors.toList());
 

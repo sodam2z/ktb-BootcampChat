@@ -36,7 +36,6 @@ export default function ChatRoomsView({ router }) {
     connectionStatus,
     setConnectionStatus,
     isRetrying,
-    attemptConnection,
   } = useServerConnection();
 
   const {
@@ -62,7 +61,6 @@ export default function ChatRoomsView({ router }) {
     isRetrying,
   });
 
-  const connectionCheckTimerRef = useRef(null);
   const initialFetchStartedRef = useRef(false);
   const refreshRoomsRef = useRef(refreshRooms);
 
@@ -104,21 +102,6 @@ export default function ChatRoomsView({ router }) {
       }
     };
   }, [currentUserKey, fetchRooms]);
-
-  useEffect(() => {
-    if (!currentUserKey || connectionStatus !== CONNECTION_STATUS.CHECKING) return;
-
-    attemptConnection();
-    connectionCheckTimerRef.current = setInterval(() => {
-      attemptConnection();
-    }, 5000);
-
-    return () => {
-      if (connectionCheckTimerRef.current) {
-        clearInterval(connectionCheckTimerRef.current);
-      }
-    };
-  }, [currentUserKey, connectionStatus, attemptConnection]);
 
   // 활성도 지표는 소켓 이벤트만으로 만료를 알 수 없어 주기적으로 다시 조회한다.
   // 보이지 않는 탭에서는 갱신을 멈추고, 다시 보일 때 즉시 한 번 따라잡는다.

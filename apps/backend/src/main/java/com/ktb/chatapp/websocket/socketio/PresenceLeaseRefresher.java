@@ -2,7 +2,9 @@ package com.ktb.chatapp.websocket.socketio;
 
 import com.corundumstudio.socketio.SocketIOClient;
 import com.corundumstudio.socketio.SocketIOServer;
+import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -12,28 +14,41 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
 public class PresenceLeaseRefresher {
 
-    private static final String LAST_REFRESH_AT = "presenceLeaseRefreshedAt";
-    private static final long REFRESH_INTERVAL_MILLIS = java.time.Duration.ofMinutes(5).toMillis();
+    static final String LAST_PRESENCE_REFRESH_AT = "lastPresenceRefreshAt";
 
     private final ConnectedUsers connectedUsers;
+    private final long refreshIntervalMillis;
 
-    public PresenceLeaseRefresher(SocketIOServer socketIOServer, ConnectedUsers connectedUsers) {
+    public PresenceLeaseRefresher(
+            SocketIOServer socketIOServer,
+            ConnectedUsers connectedUsers,
+            @Value("${socketio.presence-refresh-interval:5m}") Duration refreshInterval) {
         this.connectedUsers = connectedUsers;
+        this.refreshIntervalMillis = Math.max(0, refreshInterval.toMillis());
         socketIOServer.addPongListener(this::onPong);
     }
 
     void onPong(SocketIOClient client) {
         SocketUser socketUser = client.get("user");
-        Long lastRefreshAt = client.get(LAST_REFRESH_AT);
-        long now = System.currentTimeMillis();
-        if (socketUser == null || (lastRefreshAt != null && now - lastRefreshAt < REFRESH_INTERVAL_MILLIS)) {
+        if (socketUser == null || !shouldRefreshPresence(client)) {
             return;
         }
 
-        client.set(LAST_REFRESH_AT, now);
-        if (!connectedUsers.refreshIfCurrent(socketUser)) {
+        if (connectedUsers.refreshIfCurrent(socketUser)) {
+            client.set(LAST_PRESENCE_REFRESH_AT, System.currentTimeMillis());
+            return;
+        }
+
+        if (log.isDebugEnabled()) {
             log.debug("Skipped stale presence lease refresh: userId={}, socketId={}",
                     socketUser.id(), socketUser.socketId());
         }
+    }
+
+    private boolean shouldRefreshPresence(SocketIOClient client) {
+        Long lastRefreshAt = client.get(LAST_PRESENCE_REFRESH_AT);
+        return lastRefreshAt == null
+                || refreshIntervalMillis == 0
+                || System.currentTimeMillis() - lastRefreshAt >= refreshIntervalMillis;
     }
 }

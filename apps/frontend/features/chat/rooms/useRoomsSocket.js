@@ -7,6 +7,8 @@ const CONNECTION_STATUS = {
   ERROR: 'error',
 };
 
+const ROOM_ACTIVITY_DEBOUNCE_MS = 250;
+
 export const useRoomsSocket = ({
   currentUser,
   setConnectionStatus,
@@ -16,6 +18,8 @@ export const useRoomsSocket = ({
 }) => {
   const socketRef = useRef(null);
   const currentPageRef = useRef(currentPage);
+  const roomActivityTimerRef = useRef(null);
+  const pendingRoomActivityRef = useRef(new Map());
 
   useEffect(() => {
     currentPageRef.current = currentPage;
@@ -25,6 +29,64 @@ export const useRoomsSocket = ({
     if (!currentUser?.token) return;
 
     let isSubscribed = true;
+    let subscribedSocket = null;
+    let subscribedHandlers = null;
+
+    const flushRoomActivity = () => {
+      roomActivityTimerRef.current = null;
+
+      if (!isSubscribed || pendingRoomActivityRef.current.size === 0) {
+        return;
+      }
+
+      const activityByRoomId = new Map(pendingRoomActivityRef.current);
+      pendingRoomActivityRef.current.clear();
+
+      setRooms((prev) =>
+        prev.map((room) => {
+          const activity = activityByRoomId.get(room._id);
+          return activity
+            ? { ...room, recentMessageCount: activity.recentMessageCount }
+            : room;
+        })
+      );
+    };
+
+    const queueRoomActivity = (activity) => {
+      if (!activity?._id) return;
+
+      pendingRoomActivityRef.current.set(activity._id, activity);
+
+      if (roomActivityTimerRef.current) {
+        return;
+      }
+
+      roomActivityTimerRef.current = window.setTimeout(
+        flushRoomActivity,
+        ROOM_ACTIVITY_DEBOUNCE_MS
+      );
+    };
+
+    const clearRoomActivityQueue = () => {
+      if (roomActivityTimerRef.current) {
+        window.clearTimeout(roomActivityTimerRef.current);
+        roomActivityTimerRef.current = null;
+      }
+
+      pendingRoomActivityRef.current.clear();
+    };
+
+    const unsubscribeSocketEvents = () => {
+      if (!subscribedSocket || !subscribedHandlers) {
+        return;
+      }
+
+      Object.entries(subscribedHandlers).forEach(([event, handler]) => {
+        subscribedSocket.off?.(event, handler);
+      });
+      subscribedSocket = null;
+      subscribedHandlers = null;
+    };
 
     const connectSocket = async () => {
       try {
@@ -67,10 +129,12 @@ export const useRoomsSocket = ({
             });
 
             if (currentPageRef.current === 0) {
-              setRooms((prev) => [
-                newRoom,
-                ...prev.filter((room) => room._id !== newRoom._id),
-              ].slice(0, 20));
+              setRooms((prev) =>
+                [
+                  newRoom,
+                  ...prev.filter((room) => room._id !== newRoom._id),
+                ].slice(0, 20)
+              );
             }
           },
           roomUpdated: (updatedRoom) => {
@@ -81,19 +145,12 @@ export const useRoomsSocket = ({
             );
           },
           // 활성도 지표만 담긴 경량 payload이므로 방 정보를 덮지 않고 병합한다
-          roomActivity: (activity) => {
-            if (!activity?._id) return;
-
-            setRooms((prev) =>
-              prev.map((room) =>
-                room._id === activity._id
-                  ? { ...room, recentMessageCount: activity.recentMessageCount }
-                  : room
-              )
-            );
-          },
+          roomActivity: queueRoomActivity,
         };
 
+        unsubscribeSocketEvents();
+        subscribedSocket = socket;
+        subscribedHandlers = handlers;
         Object.entries(handlers).forEach(([event, handler]) => {
           socket.on(event, handler);
         });
@@ -116,13 +173,12 @@ export const useRoomsSocket = ({
 
     return () => {
       isSubscribed = false;
-      if (socketRef.current) {
-        if (socketRef.current.connected) {
-          socketRef.current.emit('leaveRoomList');
-        }
-        socketRef.current.disconnect();
-        socketRef.current = null;
+      clearRoomActivityQueue();
+      if (subscribedSocket?.connected) {
+        subscribedSocket.emit('leaveRoomList');
       }
+      unsubscribeSocketEvents();
+      socketRef.current = null;
     };
   }, [currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -17,14 +17,17 @@ export class SocketService {
     this.connectionTimeout = null;
     this.retryDelay = 1000;
     this.connected = false;
+    this.connectionKey = null;
   }
 
   async connect(options = {}) {
+    const nextConnectionKey = this.createConnectionKey(options);
+
     if (this.connectionPromise) {
       return this.connectionPromise;
     }
 
-    if (this.socket?.connected) {
+    if (this.socket?.connected && this.connectionKey === nextConnectionKey) {
       return Promise.resolve(this.socket);
     }
 
@@ -67,9 +70,10 @@ export class SocketService {
           reconnectionDelay: this.retryDelay,
           reconnectionDelayMax: 5000,
           timeout: 20000,
-          forceNew: true
+          forceNew: options.forceNew ?? false
         });
         this.socket = socket;
+        this.connectionKey = nextConnectionKey;
         this.connectionReject = (error) => rejectConnection(error, socket);
         this.connectionTimeout = setTimeout(() => {
           if (socket !== this.socket) {
@@ -192,9 +196,15 @@ export class SocketService {
     if (socket === this.socket) {
       this.socket = null;
       this.connected = false;
+      this.connectionKey = null;
     }
 
     socket.disconnect();
+  }
+
+  createConnectionKey(options = {}) {
+    const auth = options.auth || {};
+    return `${auth.token || ''}:${auth.sessionId || ''}`;
   }
 
   rejectPendingConnection(error) {

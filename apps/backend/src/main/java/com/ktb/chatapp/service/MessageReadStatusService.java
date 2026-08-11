@@ -31,6 +31,10 @@ public class MessageReadStatusService {
      * @param userId 읽은 사용자 ID
      */
     public long updateReadStatus(List<String> messageIds, String userId) {
+        return updateReadStatus(messageIds, userId, null);
+    }
+
+    public long updateReadStatus(List<String> messageIds, String userId, String roomId) {
         if (messageIds.isEmpty()) {
             return 0;
         }
@@ -41,12 +45,16 @@ public class MessageReadStatusService {
                 .build();
 
         try {
-            Query query = Query.query(
-                    Criteria.where("_id")
-                            .in(messageIds)
-                            .and("readers.userId")
-                            .ne(userId)
-            );
+            Criteria criteria = Criteria.where("_id")
+                    .in(messageIds)
+                    .and("readers.userId")
+                    .ne(userId);
+
+            if (roomId != null && !roomId.isBlank()) {
+                criteria.and("room").is(roomId);
+            }
+
+            Query query = Query.query(criteria);
 
             Update update = new Update()
                     .push("readers", readerInfo);

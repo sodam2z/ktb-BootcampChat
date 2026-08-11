@@ -26,7 +26,50 @@ const FileMessage = ({
   const { user } = useAuth();
   const [error, setError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [shouldLoadPreview, setShouldLoadPreview] = useState(false);
   const messageDomRef = useRef(null);
+
+  useEffect(() => {
+    setShouldLoadPreview(false);
+    setPreviewUrl('');
+    setError(null);
+  }, [msg?.file?.filename]);
+
+  useEffect(() => {
+    if (!msg?.file || msg?.file?.deleted) {
+      return;
+    }
+
+    if (shouldLoadPreview || typeof IntersectionObserver === 'undefined') {
+      setShouldLoadPreview(true);
+      return;
+    }
+
+    const target = messageDomRef.current;
+    if (!target) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          setShouldLoadPreview(true);
+          observer.disconnect();
+        }
+      },
+      {
+        root: null,
+        rootMargin: '300px 0px',
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [msg?.file, msg?.file?.deleted, shouldLoadPreview]);
 
   useEffect(() => {
     if (msg?.file?.deleted) {
@@ -36,6 +79,11 @@ const FileMessage = ({
     }
 
     if (!msg?.file) {
+      setPreviewUrl('');
+      return;
+    }
+
+    if (!shouldLoadPreview) {
       setPreviewUrl('');
       return;
     }
@@ -50,6 +98,7 @@ const FileMessage = ({
     setPreviewUrl(url);
   }, [
     msg?.file,
+    shouldLoadPreview,
     user?.token,
     user?.sessionId
   ]);
@@ -188,7 +237,7 @@ const FileMessage = ({
       return (
         <div className="bg-transparent-pattern">
           <img
-            src={previewUrl}
+            src={previewUrl || '/images/placeholder-image.png'}
             alt={originalname}
             className="max-w-[400px] max-h-[400px] object-cover object-center rounded-md"
             onError={(e) => {

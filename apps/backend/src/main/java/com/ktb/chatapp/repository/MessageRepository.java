@@ -36,6 +36,12 @@ public interface MessageRepository extends MongoRepository<Message, String> {
      */
     Optional<Message> findByFileId(String fileId);
 
+    @Query(value = "{ 'file': ?0 }", fields = "{ '_id': 1, 'room': 1 }")
+    Optional<Message> findRoomOnlyByFileId(String fileId);
+
     @Query(value = "{ '_id': ?0 }", fields = "{ 'room': 1 }")
     Optional<Message> findRoomOnlyById(String messageId);
+
+    @Query(value = "{ '_id': { $in: ?0 } }", fields = "{ '_id': 1, 'room': 1 }")
+    List<Message> findRoomsOnlyByIdIn(List<String> messageIds);
 }

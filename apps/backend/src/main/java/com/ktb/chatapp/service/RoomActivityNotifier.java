@@ -1,7 +1,8 @@
 package com.ktb.chatapp.service;
 
-import com.ktb.chatapp.event.RoomActivityEvent;
+import com.ktb.chatapp.event.RoomActivitiesEvent;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,17 +71,13 @@ public class RoomActivityNotifier {
             Map<String, Integer> recentMessageCounts =
                     recentMessageCounter.countRecentMessagesByRoomIds(roomIds);
 
+            Map<String, Integer> activityCounts = new HashMap<>();
             for (String roomId : roomIds) {
-                int recentMessageCount =
-                        recentMessageCounts.getOrDefault(roomId, 0);
+                activityCounts.put(roomId, recentMessageCounts.getOrDefault(roomId, 0));
+            }
 
-                eventPublisher.publishEvent(
-                        new RoomActivityEvent(
-                                this,
-                                roomId,
-                                recentMessageCount
-                        )
-                );
+            if (!activityCounts.isEmpty()) {
+                eventPublisher.publishEvent(new RoomActivitiesEvent(this, activityCounts));
             }
 
         } catch (Exception e) {

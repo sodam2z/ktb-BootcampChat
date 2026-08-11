@@ -21,6 +21,9 @@ describe('useRoomsSocket', () => {
       on: vi.fn((event, handler) => {
         handlers[event] = handler;
       }),
+      off: vi.fn((event) => {
+        delete handlers[event];
+      }),
       emit: vi.fn(),
       disconnect: vi.fn(),
     };
@@ -58,6 +61,22 @@ describe('useRoomsSocket', () => {
     await waitFor(() => expect(socket.on).toHaveBeenCalled());
 
     expect(Object.keys(handlers)).not.toContain('roomDeleted');
+  });
+
+  it('removes room-list listeners without closing the shared socket on cleanup', async () => {
+    const { unmount } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomCreated).toBeTypeOf('function'));
+
+    unmount();
+
+    expect(socket.off).toHaveBeenCalledWith('connect', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('disconnect', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('error', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomCreated', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomUpdated', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomActivity', expect.any(Function));
+    expect(socket.emit).toHaveBeenCalledWith('leaveRoomList');
+    expect(socket.disconnect).not.toHaveBeenCalled();
   });
 
   it('prepends a created room on the first page and keeps only 20 rows', async () => {
@@ -111,6 +130,8 @@ describe('useRoomsSocket', () => {
 
     act(() => handlers.roomActivity({ _id: 'room-2', recentMessageCount: 9 }));
 
+    await waitFor(() => expect(setRooms).toHaveBeenCalledTimes(1));
+
     const updateRooms = setRooms.mock.calls[0][0];
     expect(updateRooms([
       { _id: 'room-1', name: '방1', recentMessageCount: 1 },
@@ -118,6 +139,31 @@ describe('useRoomsSocket', () => {
     ])).toEqual([
       { _id: 'room-1', name: '방1', recentMessageCount: 1 },
       { _id: 'room-2', name: '방2', recentMessageCount: 9 },
+    ]);
+  });
+
+  it('batches bursty roomActivity updates into one room state update', async () => {
+    const { setRooms } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomActivity).toBeTypeOf('function'));
+
+    act(() => {
+      handlers.roomActivity({ _id: 'room-1', recentMessageCount: 2 });
+      handlers.roomActivity({ _id: 'room-2', recentMessageCount: 3 });
+      handlers.roomActivity({ _id: 'room-1', recentMessageCount: 4 });
+    });
+
+    expect(setRooms).not.toHaveBeenCalled();
+    await waitFor(() => expect(setRooms).toHaveBeenCalledTimes(1));
+
+    const updateRooms = setRooms.mock.calls[0][0];
+    expect(updateRooms([
+      { _id: 'room-1', recentMessageCount: 1 },
+      { _id: 'room-2', recentMessageCount: 1 },
+      { _id: 'room-3', recentMessageCount: 1 },
+    ])).toEqual([
+      { _id: 'room-1', recentMessageCount: 4 },
+      { _id: 'room-2', recentMessageCount: 3 },
+      { _id: 'room-3', recentMessageCount: 1 },
     ]);
   });
 

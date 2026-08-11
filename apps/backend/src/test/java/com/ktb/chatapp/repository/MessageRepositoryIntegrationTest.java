@@ -54,6 +54,22 @@ class MessageRepositoryIntegrationTest {
                 org.assertj.core.groups.Tuple.tuple("room-2", 1L));
     }
 
+    @Test
+    @DisplayName("파일 인가는 메시지의 id와 room만 projection한다")
+    void findRoomOnlyByFileId_returnsAuthorizationProjection() {
+        Message saved = messageRepository.save(Message.builder()
+            .roomId("room-file")
+            .fileId("file-1")
+            .content("projection에서 제외될 큰 메시지 본문")
+            .build());
+
+        Message projection = messageRepository.findRoomOnlyByFileId("file-1").orElseThrow();
+
+        assertThat(projection.getId()).isEqualTo(saved.getId());
+        assertThat(projection.getRoomId()).isEqualTo("room-file");
+        assertThat(projection.getContent()).isNull();
+    }
+
     private void saveMessage(String roomId, LocalDateTime timestamp) {
         Message saved = messageRepository.save(Message.builder()
             .roomId(roomId)

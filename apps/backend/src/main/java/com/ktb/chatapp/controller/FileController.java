@@ -2,6 +2,8 @@ package com.ktb.chatapp.controller;
 
 import com.ktb.chatapp.dto.StandardResponse;
 import com.ktb.chatapp.exception.DeletedFileException;
+import com.ktb.chatapp.exception.DirectUploadNotSupportedException;
+import com.ktb.chatapp.exception.FileAccessException;
 import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.UserRepository;
@@ -31,6 +33,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,6 +53,8 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/files")
 public class FileController {
+
+    private static final String FILE_PREVIEW_CACHE_CONTROL = "private, max-age=300";
 
     private final FileService fileService;
     private final FileAccessService fileAccessService;
@@ -231,6 +236,15 @@ public class FileController {
 
             return ResponseEntity.ok(response);
 
+        } catch (DirectUploadNotSupportedException e) {
+            log.info("현재 스토리지의 직접 업로드 미지원: {}", e.getMessage());
+
+            return ResponseEntity
+                    .status(HttpStatus.CONFLICT)
+                    .body(Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    ));
         } catch (RuntimeException e) {
             log.warn(
                     "파일 presign 발급 실패",
@@ -359,12 +373,10 @@ public class FileController {
             Principal principal
     ) {
         try {
-            User user = getUser(principal);
-
             return switch (
                     fileAccessService.forDownload(
                             filename,
-                            user.getId()
+                            getRequesterId(principal)
                     )
                     ) {
                 case FileAccess.Stream stream ->
@@ -373,6 +385,10 @@ public class FileController {
                 case FileAccess.Redirect redirect ->
                         redirectResponse(redirect);
             };
+
+        } catch (FileAccessException e) {
+            logFileAccessDenied("download", filename, request, e);
+            return handleFileError(e);
 
         } catch (Exception e) {
             log.error(
@@ -399,12 +415,10 @@ public class FileController {
             Principal principal
     ) {
         try {
-            User user = getUser(principal);
-
             return switch (
                     fileAccessService.forView(
                             filename,
-                            user.getId()
+                            getRequesterId(principal)
                     )
                     ) {
                 case FileAccess.Stream stream ->
@@ -429,6 +443,10 @@ public class FileController {
                                     safeMessage(e)
                             )
                     );
+
+        } catch (FileAccessException e) {
+            logFileAccessDenied("view", filename, request, e);
+            return handleFileError(e);
 
         } catch (Exception e) {
             log.error(
@@ -610,6 +628,10 @@ public class FileController {
                         HttpHeaders.CONTENT_DISPOSITION,
                         contentDisposition
                 )
+                .header(
+                        HttpHeaders.CACHE_CONTROL,
+                        FILE_PREVIEW_CACHE_CONTROL
+                )
                 .body(stream.resource());
     }
 
@@ -622,10 +644,7 @@ public class FileController {
                 .build();
     }
 
-    /**
-     * 최신 main의 기존 에러 매핑을 유지하면서
-     * DeletedFileException만 410으로 추가한다.
-     */
+    /** 파일 읽기 전용 예외는 타입으로 매핑하고 기존 쓰기 경로의 호환 매핑은 유지한다. */
     private ResponseEntity<?> handleFileError(
             Exception e
     ) {
@@ -638,7 +657,11 @@ public class FileController {
         String responseMessage =
                 "파일 처리 중 오류가 발생했습니다.";
 
-        if (e instanceof DeletedFileException) {
+        if (e instanceof FileAccessException fileAccessException) {
+            status = fileAccessException.getReason().getStatus();
+            responseMessage = fileAccessException.getReason().getMessage();
+
+        } else if (e instanceof DeletedFileException) {
             status = HttpStatus.GONE;
             responseMessage =
                     "삭제된 파일입니다.";
@@ -722,6 +745,39 @@ public class FileController {
                                 responseMessage
                         )
                 );
+    }
+
+    private void logFileAccessDenied(
+            String operation,
+            String filename,
+            HttpServletRequest request,
+            FileAccessException exception
+    ) {
+        log.warn(
+                "파일 읽기 요청 거부: operation={}, reason={}, filename={}, testId={}, scenario={}, vuId={}",
+                operation,
+                exception.getReason().getCode(),
+                filename,
+                headerOrUnknown(request, "X-Test-Id"),
+                headerOrUnknown(request, "X-Scenario"),
+                headerOrUnknown(request, "X-Vu-Id")
+        );
+    }
+
+    private String headerOrUnknown(HttpServletRequest request, String name) {
+        String value = request.getHeader(name);
+        return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    private String getRequesterId(Principal principal) {
+        if (principal instanceof Authentication authentication
+                && authentication.getDetails() instanceof Map<?, ?> details) {
+            Object userId = details.get("userId");
+            if (userId instanceof String value && !value.isBlank()) {
+                return value;
+            }
+        }
+        return getUser(principal).getId();
     }
 
     private User getUser(

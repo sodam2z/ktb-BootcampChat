@@ -36,6 +36,7 @@ vi.mock('@/lib/socket/socketClient', () => ({
   default: {
     connect: vi.fn(),
     leaveRoom: vi.fn(),
+    tryLeaveRoom: vi.fn(),
     joinRoomAndWait: vi.fn(),
     fetchPreviousMessagesAndWait: vi.fn(),
     subscribeRoomEvents: vi.fn(),
@@ -210,8 +211,6 @@ describe('useRoomHandling', () => {
     socketClient.connect.mockResolvedValue(createSocket());
     socketClient.joinRoomAndWait.mockResolvedValue({
       roomId: 'room-1',
-      messages: [{ _id: 'join-message-1', timestamp: '2026-07-07T00:00:00.000Z' }],
-      hasMore: false,
     });
     socketClient.fetchPreviousMessagesAndWait.mockResolvedValue({
       messages: [{ _id: 'message-1', timestamp: '2026-07-07T00:00:00.000Z' }],
@@ -247,7 +246,12 @@ describe('useRoomHandling', () => {
     });
 
     expect(socketClient.connect).toHaveBeenCalledTimes(1);
-    expect(api.get).toHaveBeenCalledWith('/api/rooms/room-1', expect.any(Object));
+    expect(api.get).toHaveBeenCalledWith(
+      '/api/rooms/room-1',
+      expect.objectContaining({
+        params: { includeRecentCount: false },
+      }),
+    );
     expect(socketClient.subscribeRoomEvents).toHaveBeenCalledWith(
       harness.socketRef.current,
       expect.objectContaining({
@@ -261,11 +265,15 @@ describe('useRoomHandling', () => {
       }),
     );
     expect(socketClient.joinRoomAndWait).toHaveBeenCalledWith('room-1', harness.socketRef.current);
-    expect(socketClient.fetchPreviousMessagesAndWait).not.toHaveBeenCalled();
+    expect(socketClient.fetchPreviousMessagesAndWait).toHaveBeenCalledWith(
+      { roomId: 'room-1', limit: 30 },
+      harness.socketRef.current,
+      expect.objectContaining({ timeoutMs: 5000 }),
+    );
     expect(harness.setters.setMessages).toHaveBeenCalledWith(expect.any(Function));
     expect(harness.setters.setHasMoreMessages).toHaveBeenCalledWith(false);
     expect(harness.initialLoadCompletedRef.current).toBe(true);
-    expect(harness.processedMessageIds.current.has('join-message-1')).toBe(true);
+    expect(harness.processedMessageIds.current.has('message-1')).toBe(true);
     expect(harness.actions.setupStarted).toHaveBeenCalledTimes(1);
     expect(harness.actions.setupSucceeded).toHaveBeenCalledWith(
       expect.objectContaining({ _id: 'room-1' }),
@@ -274,19 +282,83 @@ describe('useRoomHandling', () => {
     expect(harness.setupCompleteRef.current).toBe(true);
   });
 
-  it('falls back to fetching previous messages when join response has no messages', async () => {
-    socketClient.joinRoomAndWait.mockResolvedValueOnce({ roomId: 'room-1' });
+  it('marks room setup complete without waiting for the initial message response', async () => {
+    let resolveMessageLoad;
+    socketClient.fetchPreviousMessagesAndWait.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveMessageLoad = resolve;
+      }),
+    );
     const harness = createHarness();
 
     await act(async () => {
       await harness.result.current.setupRoom();
     });
 
+    expect(harness.actions.setupSucceeded).toHaveBeenCalledWith(
+      expect.objectContaining({ _id: 'room-1' }),
+    );
+    expect(harness.setupCompleteRef.current).toBe(true);
+    expect(harness.initialLoadCompletedRef.current).toBe(false);
     expect(socketClient.fetchPreviousMessagesAndWait).toHaveBeenCalledWith(
       { roomId: 'room-1', limit: 30 },
       harness.socketRef.current,
       expect.objectContaining({ timeoutMs: 5000 }),
     );
+
+    await act(async () => {
+      resolveMessageLoad({
+        messages: [{ _id: 'message-late', timestamp: '2026-07-07T00:00:00.000Z' }],
+        hasMore: false,
+      });
+    });
+
+    expect(harness.initialLoadCompletedRef.current).toBe(true);
+  });
+
+  it('restores Socket room membership without waiting for missed messages', async () => {
+    const harness = createHarness();
+    await act(async () => {
+      await harness.result.current.setupRoom();
+    });
+
+    vi.clearAllMocks();
+    let resolveMessageLoad;
+    socketClient.fetchPreviousMessagesAndWait.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveMessageLoad = resolve;
+      }),
+    );
+
+    await act(async () => {
+      await harness.result.current.rejoinRoom();
+    });
+
+    expect(socketClient.joinRoomAndWait).toHaveBeenCalledWith(
+      'room-1',
+      harness.socketRef.current,
+    );
+    expect(socketClient.fetchPreviousMessagesAndWait).toHaveBeenCalled();
+    expect(harness.setupCompleteRef.current).toBe(true);
+
+    await act(async () => {
+      resolveMessageLoad({ messages: [], hasMore: false });
+    });
+  });
+
+  it('leaves the active room without disconnecting the shared socket on unmount', async () => {
+    const socket = createSocket();
+    socketClient.connect.mockResolvedValueOnce(socket);
+    const harness = createHarness();
+
+    await act(async () => {
+      await harness.result.current.setupRoom();
+    });
+
+    harness.unmount();
+
+    expect(socketClient.tryLeaveRoom).toHaveBeenCalledWith('room-1', socket);
+    expect(socket.disconnect).not.toHaveBeenCalled();
   });
 
   it('records setup failure through semantic reducer actions', async () => {

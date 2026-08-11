@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import ChatMessages from '../ChatMessages';
+import ChatMessages, { getChronologicalMessages } from '../ChatMessages';
 
 vi.mock('../../hooks/useInfiniteScroll', () => ({
   useInfiniteScroll: () => ({ sentinelRef: { current: null } }),
@@ -28,6 +28,28 @@ vi.mock('../UserMessage', () => ({
 }));
 
 describe('ChatMessages', () => {
+  it('reuses an already chronological message array', () => {
+    const messages = [
+      { _id: 'early', timestamp: '2026-06-20T11:00:00.000Z' },
+      { _id: 'late', timestamp: '2026-06-20T12:00:00.000Z' },
+    ];
+
+    expect(getChronologicalMessages(messages)).toBe(messages);
+  });
+
+  it('sorts only out-of-order messages without mutating the input array', () => {
+    const messages = [
+      { _id: 'late', timestamp: '2026-06-20T12:00:00.000Z' },
+      { _id: 'early', timestamp: '2026-06-20T11:00:00.000Z' },
+    ];
+
+    const sortedMessages = getChronologicalMessages(messages);
+
+    expect(sortedMessages).not.toBe(messages);
+    expect(sortedMessages.map((message) => message._id)).toEqual(['early', 'late']);
+    expect(messages.map((message) => message._id)).toEqual(['late', 'early']);
+  });
+
   it('renders messages sorted by timestamp without mutating the input array', () => {
     const messages = [
       {

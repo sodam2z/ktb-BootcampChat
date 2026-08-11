@@ -1,5 +1,6 @@
 package com.ktb.chatapp.websocket.socketio;
 
+import com.corundumstudio.socketio.BroadcastOperations;
 import com.corundumstudio.socketio.SocketIOServer;
 import com.ktb.chatapp.event.*;
 import java.util.Map;
@@ -39,7 +40,7 @@ public class SocketIOEventListener {
     public void handleRoomCreatedEvent(RoomCreatedEvent event) {
         try {
             socketIOServer.getRoomOperations(ROOM_LIST).sendEvent(ROOM_CREATED, event.getRoomResponse());
-            log.info("roomCreated 이벤트 발송: roomId={}", event.getRoomResponse().getId());
+            log.debug("roomCreated 이벤트 발송: roomId={}", event.getRoomResponse().getId());
         } catch (Exception e) {
             log.error("roomCreated 이벤트 발송 실패", e);
         }
@@ -49,7 +50,7 @@ public class SocketIOEventListener {
     public void handleRoomUpdatedEvent(RoomUpdatedEvent event) {
         try {
             socketIOServer.getRoomOperations(ROOM_LIST).sendEvent(ROOM_UPDATE, event.getRoomResponse());
-            log.info("roomUpdate 이벤트 발송: roomId={}", event.getRoomId());
+            log.debug("roomUpdate 이벤트 발송: roomId={}", event.getRoomId());
         } catch (Exception e) {
             log.error("roomUpdate 이벤트 발송 실패: roomId={}", event.getRoomId(), e);
         }
@@ -58,15 +59,37 @@ public class SocketIOEventListener {
     @EventListener
     public void handleRoomActivityEvent(RoomActivityEvent event) {
         try {
-            socketIOServer.getRoomOperations(ROOM_LIST).sendEvent(ROOM_ACTIVITY, Map.of(
-                    "_id", event.getRoomId(),
-                    "recentMessageCount", event.getRecentMessageCount()
-            ));
+            sendRoomActivity(
+                    socketIOServer.getRoomOperations(ROOM_LIST),
+                    event.getRoomId(),
+                    event.getRecentMessageCount());
             log.debug("roomActivity 이벤트 발송: roomId={}, recentMessageCount={}",
                     event.getRoomId(), event.getRecentMessageCount());
         } catch (Exception e) {
             log.error("roomActivity 이벤트 발송 실패: roomId={}", event.getRoomId(), e);
         }
+    }
+
+    @EventListener
+    public void handleRoomActivitiesEvent(RoomActivitiesEvent event) {
+        try {
+            BroadcastOperations roomListOperations = socketIOServer.getRoomOperations(ROOM_LIST);
+            event.getRecentMessageCounts().forEach((roomId, recentMessageCount) ->
+                    sendRoomActivity(roomListOperations, roomId, recentMessageCount));
+            log.debug("roomActivity batch event sent: count={}", event.getRecentMessageCounts().size());
+        } catch (Exception e) {
+            log.error("roomActivity batch event failed: roomIds={}", event.getRecentMessageCounts().keySet(), e);
+        }
+    }
+
+    private void sendRoomActivity(
+            BroadcastOperations roomListOperations,
+            String roomId,
+            int recentMessageCount) {
+        roomListOperations.sendEvent(ROOM_ACTIVITY, Map.of(
+                "_id", roomId,
+                "recentMessageCount", recentMessageCount
+        ));
     }
 
     @EventListener

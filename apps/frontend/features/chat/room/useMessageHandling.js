@@ -3,6 +3,30 @@ import { Toast } from '@/components/Toast';
 import socketClient from '@/lib/socket/socketClient';
 import { useChatFileUpload } from '../files/useChatFileUpload';
 
+export const getOldestMessageTimestamp = (messages) => {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return undefined;
+  }
+
+  let oldestTimestamp;
+  let oldestValue = Number.POSITIVE_INFINITY;
+
+  for (const message of messages) {
+    const timestamp = message?.timestamp;
+    if (!timestamp) continue;
+
+    const value = Date.parse(timestamp);
+    if (Number.isNaN(value)) continue;
+
+    if (value < oldestValue) {
+      oldestValue = value;
+      oldestTimestamp = timestamp;
+    }
+  }
+
+  return oldestTimestamp;
+};
+
 export const useMessageHandling = (
   currentUser,
   roomId,
@@ -45,11 +69,7 @@ export const useMessageHandling = (
     }
 
     // 가장 오래된 메시지의 타임스탬프 찾기
-    const sortedMessages = [...messages].sort(
-      (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-    );
-    const oldestMessage = sortedMessages[0];
-    const beforeTimestamp = oldestMessage?.timestamp;
+    const beforeTimestamp = getOldestMessageTimestamp(messages);
 
     if (!beforeTimestamp) {
       return;

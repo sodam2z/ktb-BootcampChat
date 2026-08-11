@@ -49,6 +49,21 @@ class S3StorageTest {
     }
 
     @Test
+    void chatUploadUsesBoundedPrivateCache() {
+        byte[] content = "image".getBytes();
+
+        storage.put(
+                new ByteArrayInputStream(content),
+                "chat/user-1/file.jpg",
+                "image/jpeg",
+                content.length);
+
+        ArgumentCaptor<PutObjectRequest> request = ArgumentCaptor.forClass(PutObjectRequest.class);
+        verify(s3Client).putObject(request.capture(), any(RequestBody.class));
+        assertThat(request.getValue().cacheControl()).isEqualTo(S3Storage.CHAT_PREVIEW_CACHE_CONTROL);
+    }
+
+    @Test
     void deleteUsesSamePhysicalPrefix() {
         storage.delete("profiles/avatar.jpg");
 
@@ -70,10 +85,15 @@ class S3StorageTest {
                 .orElseThrow();
 
         assertThat(result).isEqualTo(URI.create("https://example.test/signed-profile"));
+        ArgumentCaptor<GetObjectPresignRequest> request =
+                ArgumentCaptor.forClass(GetObjectPresignRequest.class);
+        verify(presigner).presignGetObject(request.capture());
+        assertThat(request.getValue().getObjectRequest().responseCacheControl())
+                .isEqualTo(S3Storage.CHAT_PREVIEW_CACHE_CONTROL);
     }
 
     @Test
-    void directUploadSignsOnlyRequiredContentTypeHeader() throws Exception {
+    void directUploadSignsContentTypeAndBoundedPrivateCache() throws Exception {
         PresignedPutObjectRequest signed = mock(PresignedPutObjectRequest.class);
         when(signed.url()).thenReturn(new URL("https://example.test/signed-upload"));
         when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(signed);
@@ -84,6 +104,7 @@ class S3StorageTest {
                 ArgumentCaptor.forClass(PutObjectPresignRequest.class);
         verify(presigner).presignPutObject(request.capture());
         assertThat(request.getValue().putObjectRequest().contentType()).isEqualTo("image/jpeg");
-        assertThat(request.getValue().putObjectRequest().cacheControl()).isNull();
+        assertThat(request.getValue().putObjectRequest().cacheControl())
+                .isEqualTo(S3Storage.CHAT_PREVIEW_CACHE_CONTROL);
     }
 }

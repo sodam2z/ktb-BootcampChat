@@ -1,5 +1,6 @@
 package com.ktb.chatapp.service;
 
+import com.ktb.chatapp.exception.DirectUploadNotSupportedException;
 import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.storage.StorageKey;
@@ -49,11 +50,7 @@ public class ChatFileDirectUploadService {
                         mimetype,
                         presignTtl
                 )
-                .orElseThrow(() ->
-                        new IllegalStateException(
-                                "현재 스토리지는 직접 업로드를 지원하지 않습니다."
-                        )
-                );
+                .orElseThrow(DirectUploadNotSupportedException::new);
 
         return new PreparedUpload(
                 uploadUrl.toString(),

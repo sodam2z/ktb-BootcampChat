@@ -4,10 +4,15 @@ import com.ktb.chatapp.dto.ProfileImageResponse;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.storage.LocalStorage;
+import com.ktb.chatapp.storage.StoragePort;
+import com.ktb.chatapp.storage.StoredObjectMetadata;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
+import java.time.Duration;
+import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("UserService 단위 테스트")
@@ -114,6 +120,37 @@ class UserServiceTest {
 
         assertThat(oldFile).exists();
         assertThat(newFile).doesNotExist();
+    }
+
+    @Test
+    @DisplayName("프로필 직접 업로드는 파일 본문을 API로 받지 않고 presign과 metadata 확인만 수행한다")
+    void directProfileUpload_UsesPresignAndMetadataOnly() {
+        StoragePort storagePort = mock(StoragePort.class);
+        UserService directService = new UserService(
+                userRepository, fileService, storagePort, mongoOperations);
+        ReflectionTestUtils.setField(directService, "maxProfileImageSize", 5242880L);
+        ReflectionTestUtils.setField(directService, "profilePresignTtl", Duration.ofMinutes(10));
+        User user = User.builder().id("user-1").email(EMAIL).build();
+        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        when(storagePort.presignUploadUrl(any(), eq("image/jpeg"), eq(Duration.ofMinutes(10))))
+                .thenReturn(Optional.of(URI.create("https://s3.example/upload")));
+
+        UserService.PreparedProfileUpload prepared = directService.prepareProfileImageUpload(
+                EMAIL, "profile.jpg", "image/jpeg", 1024L);
+
+        assertThat(prepared.uploadUrl()).isEqualTo("https://s3.example/upload");
+        assertThat(prepared.key()).startsWith("profiles/user-1_");
+
+        when(storagePort.stat(prepared.key()))
+                .thenReturn(Optional.of(new StoredObjectMetadata(1024L, "image/jpeg")));
+        when(mongoOperations.findAndModify(
+                any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(User.class)))
+                .thenReturn(user);
+
+        ProfileImageResponse response = directService.completeProfileImageUpload(
+                EMAIL, prepared.key(), "profile.jpg", "image/jpeg", 1024L);
+
+        assertThat(response.getImageUrl()).isEqualTo("/api/files/" + prepared.key());
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.ktb.chatapp.dto.ProfileImageResponse;
 import com.ktb.chatapp.dto.UpdateProfileRequest;
 import com.ktb.chatapp.dto.UserResponse;
 import com.ktb.chatapp.service.UserService;
+import com.ktb.chatapp.exception.DirectUploadNotSupportedException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.ExampleObject;
@@ -28,6 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.security.Principal;
+import java.util.Map;
 
 @Tag(name = "사용자 (Users)", description = "사용자 프로필 관리 API - 프로필 조회, 수정, 이미지 업로드, 회원 탈퇴")
 @RequiredArgsConstructor
@@ -138,6 +140,46 @@ public class UserController {
             log.error("프로필 이미지 업로드 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(StandardResponse.error("이미지 업로드 중 오류가 발생했습니다."));
         }
+    }
+
+    @PostMapping("/profile-image/presign")
+    public ResponseEntity<?> createProfileImageUploadUrl(
+            Principal principal,
+            @RequestBody ProfileImageUploadRequest request) {
+        try {
+            var prepared = userService.prepareProfileImageUpload(
+                    principal.getName(), request.originalname(), request.mimetype(), request.size());
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "uploadUrl", prepared.uploadUrl(),
+                    "key", prepared.key()));
+        } catch (DirectUploadNotSupportedException e) {
+            return ResponseEntity.status(409).body(StandardResponse.error("직접 업로드를 지원하지 않습니다."));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(StandardResponse.error(e.getMessage()));
+        }
+    }
+
+    @PostMapping("/profile-image/complete")
+    public ResponseEntity<?> completeProfileImageUpload(
+            Principal principal,
+            @RequestBody ProfileImageCompleteRequest request) {
+        try {
+            return ResponseEntity.ok(userService.completeProfileImageUpload(
+                    principal.getName(), request.key(), request.originalname(),
+                    request.mimetype(), request.size()));
+        } catch (UsernameNotFoundException e) {
+            return ResponseEntity.status(404).body(StandardResponse.error(e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(StandardResponse.error(e.getMessage()));
+        }
+    }
+
+    public record ProfileImageUploadRequest(String originalname, String mimetype, long size) {
+    }
+
+    public record ProfileImageCompleteRequest(
+            String key, String originalname, String mimetype, long size) {
     }
 
     /**

@@ -31,7 +31,9 @@ import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignReques
 public class S3Storage implements StoragePort {
 
     static final String PROFILE_CACHE_CONTROL = "public, max-age=31536000, immutable";
-    static final String PRIVATE_CACHE_CONTROL = "private, no-cache, no-store, must-revalidate";
+    static final String CHAT_PREVIEW_CACHE_CONTROL = "private, max-age=300";
+    static final String PRIVATE_NO_STORE_CACHE_CONTROL =
+            "private, no-cache, no-store, must-revalidate";
 
     private final S3Client s3Client;
     private final S3Presigner presigner;
@@ -63,7 +65,7 @@ public class S3Storage implements StoragePort {
                 .key(objectKey)
                 .contentType(contentType)
                 .contentLength(size)
-                .cacheControl(StorageKey.isProfile(key) ? PROFILE_CACHE_CONTROL : PRIVATE_CACHE_CONTROL)
+                .cacheControl(StorageKey.isProfile(key) ? PROFILE_CACHE_CONTROL : CHAT_PREVIEW_CACHE_CONTROL)
                 .build();
         s3Client.putObject(request, RequestBody.fromInputStream(content, size));
         return new StoredObject(key, size);
@@ -102,6 +104,9 @@ public class S3Storage implements StoragePort {
                 .bucket(bucket)
                 .key(objectKey(key))
                 .responseContentDisposition(disposition.toString())
+                .responseCacheControl(disposition.isAttachment()
+                        ? PRIVATE_NO_STORE_CACHE_CONTROL
+                        : CHAT_PREVIEW_CACHE_CONTROL)
                 .build();
         return Optional.of(presigner.presignGetObject(GetObjectPresignRequest.builder()
                         .signatureDuration(ttl)
@@ -122,6 +127,7 @@ public class S3Storage implements StoragePort {
                 .bucket(bucket)
                 .key(objectKey(key))
                 .contentType(contentType)
+                .cacheControl(StorageKey.isChat(key) ? CHAT_PREVIEW_CACHE_CONTROL : PROFILE_CACHE_CONTROL)
                 .build();
 
         return Optional.of(

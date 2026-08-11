@@ -3,6 +3,8 @@ package com.ktb.chatapp.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -12,6 +14,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ktb.chatapp.model.User;
+import com.ktb.chatapp.exception.DirectUploadNotSupportedException;
+import com.ktb.chatapp.exception.FileAccessException;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.security.SessionAwareJwtAuthenticationConverter;
 import com.ktb.chatapp.service.FileAccess;
@@ -24,6 +28,8 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.Optional;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +38,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -39,9 +46,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@code /api/files} 읽기 경로의 HTTP 표면을 고정한다. {@link FileAccessService}가 조립한
  * {@link FileAccess}를 컨트롤러가 어떤 상태코드·헤더로 번역하는지가 검증 대상이다.
  *
- * <p>두 계약이 특히 조용히 깨진다. ① {@code handleFileError}는 <b>예외 메시지 문자열</b>로 403/404를
- * 분기하므로 던지는 메시지가 바뀌면 상태코드가 바뀐다. ② download는 {@code attachment} + 캐시 금지,
- * view는 {@code inline} + 장기 캐시로 헤더가 서로 달라야 한다.
+ * <p>파일 읽기 예외의 타입별 상태 코드와 download/view의 서로 다른 응답 헤더를 검증한다.
  */
 @WebMvcTest(controllers = FileController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -116,7 +121,21 @@ class FileControllerTest {
                         "Content-Disposition",
                         "inline; filename=\"" + ORIGINAL_NAME + "\"; filename*=UTF-8''"
                                 + ENCODED_ORIGINAL_NAME))
-                .andExpect(header().doesNotExist("Cache-Control"));
+                .andExpect(header().string("Cache-Control", "private, max-age=300"));
+    }
+
+    @Test
+    @DisplayName("인증 details의 userId를 사용해 사용자 재조회를 생략한다")
+    void viewFile_authenticatedUserId_skipsUserLookup() throws Exception {
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(EMAIL, "", List.of());
+        authentication.setDetails(Map.of("userId", USER_ID));
+        when(fileAccessService.forView(FILE_NAME, USER_ID)).thenReturn(stream());
+
+        mockMvc.perform(get("/api/files/view/{filename}", FILE_NAME).principal(authentication))
+                .andExpect(status().isOk());
+
+        verify(userRepository, never()).findByEmail(EMAIL);
     }
 
     @Test
@@ -140,10 +159,10 @@ class FileControllerTest {
     }
 
     @Test
-    @DisplayName("권한 예외 메시지 → 403")
-    void downloadFile_unauthorizedMessage_returnsForbidden() throws Exception {
+    @DisplayName("비참가자 예외 → 403")
+    void downloadFile_nonParticipant_returnsForbidden() throws Exception {
         when(fileAccessService.forDownload(FILE_NAME, USER_ID))
-                .thenThrow(new RuntimeException("파일에 접근할 권한이 없습니다"));
+                .thenThrow(new FileAccessException(FileAccessException.Reason.NOT_PARTICIPANT));
 
         mockMvc.perform(get("/api/files/download/{filename}", FILE_NAME).principal(PRINCIPAL))
                 .andExpect(status().isForbidden())
@@ -152,10 +171,10 @@ class FileControllerTest {
     }
 
     @Test
-    @DisplayName("미발견 예외 메시지 → 404")
-    void downloadFile_notFoundMessage_returnsNotFound() throws Exception {
+    @DisplayName("파일 미발견 예외 → 404")
+    void downloadFile_fileNotFound_returnsNotFound() throws Exception {
         when(fileAccessService.forDownload(FILE_NAME, USER_ID))
-                .thenThrow(new RuntimeException("파일을 찾을 수 없습니다: " + FILE_NAME));
+                .thenThrow(new FileAccessException(FileAccessException.Reason.FILE_NOT_FOUND));
 
         mockMvc.perform(get("/api/files/download/{filename}", FILE_NAME).principal(PRINCIPAL))
                 .andExpect(status().isNotFound())
@@ -164,10 +183,10 @@ class FileControllerTest {
     }
 
     @Test
-    @DisplayName("view의 권한 예외도 같은 403 계약을 따른다")
-    void viewFile_unauthorizedMessage_returnsForbidden() throws Exception {
+    @DisplayName("view의 비참가자 예외도 같은 403 계약을 따른다")
+    void viewFile_nonParticipant_returnsForbidden() throws Exception {
         when(fileAccessService.forView(FILE_NAME, USER_ID))
-                .thenThrow(new RuntimeException("파일에 접근할 권한이 없습니다"));
+                .thenThrow(new FileAccessException(FileAccessException.Reason.NOT_PARTICIPANT));
 
         mockMvc.perform(get("/api/files/view/{filename}", FILE_NAME).principal(PRINCIPAL))
                 .andExpect(status().isForbidden())
@@ -221,6 +240,25 @@ class FileControllerTest {
                     .andExpect(jsonPath("$.uploadUrl").value("https://s3.example.test/signed-upload"))
                     .andExpect(jsonPath("$.key").value("chat/user-1/safe.jpg"));
         }
+    }
+
+    @Test
+    @DisplayName("직접 업로드 미지원 스토리지는 409로 폴백 가능 여부를 알린다")
+    void presign_notSupported_returnsConflict() throws Exception {
+        when(chatFileDirectUploadService.prepare(
+                eq("profile.jpg"), eq("image/jpeg"), eq(1024L), eq(USER_ID)))
+                .thenThrow(new DirectUploadNotSupportedException());
+
+        mockMvc.perform(post("/api/files/presign")
+                        .principal(PRINCIPAL)
+                        .contentType("application/json")
+                        .content("""
+                                {"originalname":"profile.jpg","mimetype":"image/jpeg","size":1024}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.message")
+                        .value("현재 스토리지는 직접 업로드를 지원하지 않습니다."));
     }
 
     private FileAccess stream() {

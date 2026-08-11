@@ -2,6 +2,7 @@ package com.ktb.chatapp.repository;
 
 import com.ktb.chatapp.model.Room;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Aggregation;
 import org.springframework.data.mongodb.repository.Query;
 import org.springframework.data.mongodb.repository.Update;
 import org.springframework.stereotype.Repository;
@@ -23,6 +24,13 @@ public interface RoomRepository extends MongoRepository<Room, String> {
     List<Room> findByParticipantIdsContaining(String userId);
 
     boolean existsByIdAndParticipantIdsContaining(String roomId, String userId);
+
+    @Aggregation(pipeline = {
+        "{ '$match': { '_id': ?0 } }",
+        "{ '$project': { '_id': 0, 'participant': "
+            + "{ '$in': [ ?1, { '$ifNull': [ '$participantIds', [] ] } ] } } }"
+    })
+    Optional<RoomAccessResult> findAccessById(String roomId, String userId);
 
     @Query("{'_id': ?0}")
     @Update("{'$addToSet': {'participantIds': ?1}}")

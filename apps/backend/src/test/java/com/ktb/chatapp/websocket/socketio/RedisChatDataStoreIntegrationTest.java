@@ -59,6 +59,8 @@ class RedisChatDataStoreIntegrationTest {
         firstStore.addToSet(key, "room-1");
         secondStore.addToSet(key, "room-2");
         assertThat(firstStore.getSet(key)).isEqualTo(Set.of("room-1", "room-2"));
+        assertThat(secondStore.setContains(key, "room-1")).isTrue();
+        assertThat(secondStore.setContains(key, "missing-room")).isFalse();
 
         secondStore.removeFromSet(key, "room-1");
         assertThat(firstStore.getSet(key)).containsExactly("room-2");

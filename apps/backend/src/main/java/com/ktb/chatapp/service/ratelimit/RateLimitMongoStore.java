@@ -2,11 +2,11 @@ package com.ktb.chatapp.service.ratelimit;
 
 import com.ktb.chatapp.model.RateLimit;
 import com.ktb.chatapp.repository.RateLimitRepository;
-import java.util.Optional;
 import java.time.Duration;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -19,22 +19,13 @@ import org.springframework.stereotype.Component;
  * Uses RateLimitRepository for persistence.
  */
 @Component
+@ConditionalOnProperty(name = "rate-limit.store.type", havingValue = "mongo")
 @RequiredArgsConstructor
 public class RateLimitMongoStore implements RateLimitStore {
     
     private final RateLimitRepository rateLimitRepository;
     private final MongoTemplate mongoTemplate;
     
-    @Override
-    public Optional<RateLimit> findByClientId(String clientId) {
-        return rateLimitRepository.findByClientId(clientId);
-    }
-    
-    @Override
-    public RateLimit save(RateLimit rateLimit) {
-        return rateLimitRepository.save(rateLimit);
-    }
-
     @Override
     public RateLimitConsumption consume(String clientId, int maxRequests, Duration window, Instant now) {
         Instant expiresAt = now.plus(window);

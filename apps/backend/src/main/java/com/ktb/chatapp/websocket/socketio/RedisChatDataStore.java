@@ -61,6 +61,11 @@ public class RedisChatDataStore implements ChatDataStore {
     }
 
     @Override
+    public boolean setContains(String key, String value) {
+        return redissonClient.<String>getSet(key).contains(value);
+    }
+
+    @Override
     public void removeFromSet(String key, String value) {
         var values = redissonClient.<String>getSet(key);
         values.remove(value);

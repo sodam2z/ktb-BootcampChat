@@ -42,6 +42,7 @@ public class Room {
     private LocalDateTime createdAt;
 
     @Field("participantIds")
+    @Indexed(name = "participant_ids_idx")
     @Builder.Default
     private Set<String> participantIds = new HashSet<>();
     

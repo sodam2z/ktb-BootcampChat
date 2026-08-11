@@ -4,6 +4,7 @@ import com.ktb.chatapp.model.Session;
 import com.ktb.chatapp.repository.SessionRepository;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -16,9 +17,10 @@ import org.springframework.stereotype.Component;
  * Uses SessionRepository for persistence.
  */
 @Component
+@ConditionalOnProperty(name = "session.store.type", havingValue = "mongo")
 @RequiredArgsConstructor
 public class SessionMongoStore implements SessionStore {
-    
+
     private final SessionRepository sessionRepository;
     private final MongoTemplate mongoTemplate;
     
@@ -26,7 +28,7 @@ public class SessionMongoStore implements SessionStore {
     public Optional<Session> findByUserId(String userId) {
         return sessionRepository.findByUserId(userId);
     }
-    
+
     @Override
     public Session save(Session session) {
         return sessionRepository.save(session);

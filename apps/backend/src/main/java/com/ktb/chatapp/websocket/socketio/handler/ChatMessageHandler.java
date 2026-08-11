@@ -26,6 +26,7 @@ import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -48,6 +49,10 @@ public class ChatMessageHandler {
     private final RateLimitService rateLimitService;
     private final UserRooms userRooms;
     private final MeterRegistry meterRegistry;
+    private final Map<String, Timer> processingTimers = new ConcurrentHashMap<>();
+    private final Map<String, Counter> successCounters = new ConcurrentHashMap<>();
+    private final Map<String, Counter> errorCounters = new ConcurrentHashMap<>();
+    private final Map<String, Counter> rateLimitCounters = new ConcurrentHashMap<>();
     
     @OnEvent(CHAT_MESSAGE)
     public void handleChatMessage(SocketIOClient client, ChatMessageRequest data) {
@@ -92,10 +97,7 @@ public class ChatMessageHandler {
                 rateLimitService.checkRateLimit(socketUser.id(), 10000, Duration.ofMinutes(1));
         if (!rateLimitResult.allowed()) {
             recordError("rate_limit_exceeded");
-            Counter.builder("socketio.messages.rate_limit")
-                    .description("Socket.IO rate limit exceeded count")
-                    .register(meterRegistry)
-                    .increment();
+            rateLimitCounter().increment();
             client.sendEvent(ERROR, Map.of(
                     "code", "RATE_LIMIT_EXCEEDED",
                     "message", "메시지 전송 횟수 제한을 초과했습니다. 잠시 후 다시 시도해주세요.",
@@ -246,27 +248,38 @@ public class ChatMessageHandler {
 
     // Metrics helper methods
     private Timer createTimer(String status, String messageType) {
-        return Timer.builder("socketio.messages.processing.time")
-                .description("Socket.IO message processing time")
-                .tag("status", status)
-                .tag("message_type", messageType)
-                .register(meterRegistry);
+        String key = status + ":" + messageType;
+        return processingTimers.computeIfAbsent(key, ignored ->
+                Timer.builder("socketio.messages.processing.time")
+                        .description("Socket.IO message processing time")
+                        .tag("status", status)
+                        .tag("message_type", messageType)
+                        .register(meterRegistry));
     }
 
     private void recordMessageSuccess(String messageType) {
-        Counter.builder("socketio.messages.total")
-                .description("Total Socket.IO messages processed")
-                .tag("status", "success")
-                .tag("message_type", messageType)
-                .register(meterRegistry)
+        successCounters.computeIfAbsent(messageType, ignored ->
+                Counter.builder("socketio.messages.total")
+                        .description("Total Socket.IO messages processed")
+                        .tag("status", "success")
+                        .tag("message_type", messageType)
+                        .register(meterRegistry))
                 .increment();
     }
 
     private void recordError(String errorType) {
-        Counter.builder("socketio.messages.errors")
-                .description("Socket.IO message processing errors")
-                .tag("error_type", errorType)
-                .register(meterRegistry)
+        errorCounters.computeIfAbsent(errorType, ignored ->
+                Counter.builder("socketio.messages.errors")
+                        .description("Socket.IO message processing errors")
+                        .tag("error_type", errorType)
+                        .register(meterRegistry))
                 .increment();
+    }
+
+    private Counter rateLimitCounter() {
+        return rateLimitCounters.computeIfAbsent("exceeded", ignored ->
+                Counter.builder("socketio.messages.rate_limit")
+                        .description("Socket.IO rate limit exceeded count")
+                        .register(meterRegistry));
     }
 }

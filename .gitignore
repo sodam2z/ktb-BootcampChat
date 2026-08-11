@@ -15,3 +15,4 @@ node_modules/
 
 # Java / Maven build
 **/target/
+.pnpm-store/

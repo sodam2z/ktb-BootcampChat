@@ -8,7 +8,8 @@ import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
-import jakarta.annotation.Nullable;
+import java.util.HashMap;
+import java.util.Objects;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -66,11 +67,22 @@ public class MessageLoader {
         
         var messageIds = sortedMessages.stream().map(Message::getId).toList();
         messageReadStatusService.updateReadStatus(messageIds, userId);
-        
-        // 메시지 응답 생성
+
+// 메시지 작성자 ID를 중복 없이 수집한다.
+        var senderIds = sortedMessages.stream()
+                .map(Message::getSenderId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+// 메시지마다 사용자를 조회하지 않고 한 번에 조회한다.
+        var usersById = new HashMap<String, User>();
+        userRepository.findAllById(senderIds)
+                .forEach(user -> usersById.put(user.getId(), user));
+
+// 메시지 응답 생성
         List<MessageResponse> messageResponses = sortedMessages.stream()
                 .map(message -> {
-                    var user = findUserById(message.getSenderId());
+                    var user = usersById.get(message.getSenderId());
                     return messageResponseMapper.mapToMessageResponse(message, user);
                 })
                 .collect(Collectors.toList());
@@ -86,15 +98,4 @@ public class MessageLoader {
                 .build();
     }
 
-    /**
-     * AI 경우 null 반환 가능
-     */
-    @Nullable
-    private User findUserById(String id) {
-        if (id == null) {
-            return null;
-        }
-        return userRepository.findById(id)
-                .orElse(null);
-    }
 }

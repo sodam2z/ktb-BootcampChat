@@ -124,6 +124,41 @@ class SessionServiceUnitTest {
     }
 
     @Test
+    @DisplayName("최근 활동한 유효 세션은 검증 시 다시 저장하지 않는다")
+    void validateSession_RecentlyActive_DoesNotWriteSession() {
+        Session session = Session.builder()
+                .userId(USER_ID)
+                .sessionId(SESSION_ID)
+                .lastActivity(Instant.now().toEpochMilli())
+                .expiresAt(Instant.now().plusSeconds(SessionService.SESSION_TTL_SEC))
+                .build();
+        when(sessionStore.findByUserId(USER_ID)).thenReturn(Optional.of(session));
+
+        SessionValidationResult result = sessionService.validateSession(USER_ID, SESSION_ID);
+
+        assertThat(result.isValid()).isTrue();
+        verify(sessionStore, never()).save(any(Session.class));
+    }
+
+    @Test
+    @DisplayName("30초 이상 지난 유효 세션은 검증 시 활동 시간을 갱신한다")
+    void validateSession_StaleActivity_UpdatesSession() {
+        Session session = Session.builder()
+                .userId(USER_ID)
+                .sessionId(SESSION_ID)
+                .lastActivity(Instant.now().minusSeconds(31).toEpochMilli())
+                .expiresAt(Instant.now().plusSeconds(SessionService.SESSION_TTL_SEC))
+                .build();
+        when(sessionStore.findByUserId(USER_ID)).thenReturn(Optional.of(session));
+        when(sessionStore.save(session)).thenReturn(session);
+
+        SessionValidationResult result = sessionService.validateSession(USER_ID, SESSION_ID);
+
+        assertThat(result.isValid()).isTrue();
+        verify(sessionStore).save(session);
+    }
+
+    @Test
     @DisplayName("활성 세션 조회 중 저장소 실패는 null로 반환된다")
     void getActiveSession_StoreFailure_ReturnsNull() {
         when(sessionStore.findByUserId(USER_ID)).thenThrow(new IllegalStateException("store down"));

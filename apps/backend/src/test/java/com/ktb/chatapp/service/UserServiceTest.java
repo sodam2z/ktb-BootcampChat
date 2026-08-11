@@ -8,7 +8,6 @@ import com.ktb.chatapp.storage.LocalStorage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,9 +17,14 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoOperations;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -37,6 +41,9 @@ class UserServiceTest {
     @Mock
     private FileService fileService;
 
+    @Mock
+    private MongoOperations mongoOperations;
+
     private UserService userService;
 
     @TempDir
@@ -48,7 +55,8 @@ class UserServiceTest {
      */
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, fileService, new LocalStorage(uploadDir.toString()));
+        userService = new UserService(
+                userRepository, fileService, new LocalStorage(uploadDir.toString()), mongoOperations);
         ReflectionTestUtils.setField(userService, "maxProfileImageSize", 5242880L);
     }
 
@@ -69,16 +77,43 @@ class UserServiceTest {
                 .email(EMAIL)
                 .profileImage("profiles/old.jpg")
                 .build();
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
         when(fileService.storeFile(any(), eq("profiles"))).thenReturn("profiles/new.jpg");
+        when(mongoOperations.findAndModify(
+                any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(User.class)))
+                .thenReturn(user);
         MockMultipartFile file = new MockMultipartFile(
                 "file", "new.jpg", "image/jpeg", "new-image-bytes".getBytes());
 
         ProfileImageResponse response = userService.uploadProfileImage(EMAIL, file);
 
         assertThat(Files.exists(oldFile)).isFalse();
-        assertThat(user.getProfileImage()).isEqualTo("profiles/new.jpg");
         assertThat(response.getImageUrl()).isEqualTo("/api/files/profiles/new.jpg");
+    }
+
+    @Test
+    @DisplayName("프로필 이미지 DB 저장 실패 시 기존 파일을 보존하고 새 파일을 정리한다")
+    void uploadProfileImage_WhenDatabaseSaveFails_PreservesOldFileAndDeletesNewFile() throws IOException {
+        Path oldFile = createOldProfileImageFile("old-save-failure.jpg");
+        Path newFile = createOldProfileImageFile("new-save-failure.jpg");
+        User user = User.builder()
+                .id("user-1")
+                .email(EMAIL)
+                .profileImage("profiles/old-save-failure.jpg")
+                .build();
+        when(fileService.storeFile(any(), eq("profiles")))
+                .thenReturn("profiles/new-save-failure.jpg");
+        when(mongoOperations.findAndModify(
+                any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(User.class)))
+                .thenThrow(new RuntimeException("mongo unavailable"));
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "new.jpg", "image/jpeg", "new-image-bytes".getBytes());
+
+        assertThatThrownBy(() -> userService.uploadProfileImage(EMAIL, file))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("mongo unavailable");
+
+        assertThat(oldFile).exists();
+        assertThat(newFile).doesNotExist();
     }
 
     @Test
@@ -90,11 +125,32 @@ class UserServiceTest {
                 .email(EMAIL)
                 .profileImage("profiles/old2.jpg")
                 .build();
-        when(userRepository.findByEmail(EMAIL)).thenReturn(Optional.of(user));
+        when(mongoOperations.findAndModify(
+                any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(User.class)))
+                .thenReturn(user);
 
         userService.deleteProfileImage(EMAIL);
 
         assertThat(Files.exists(oldFile)).isFalse();
-        assertThat(user.getProfileImage()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("프로필 이미지 DB 삭제 반영 실패 시 기존 파일을 보존한다")
+    void deleteProfileImage_WhenDatabaseSaveFails_PreservesProfileImageFile() throws IOException {
+        Path oldFile = createOldProfileImageFile("delete-save-failure.jpg");
+        User user = User.builder()
+                .id("user-1")
+                .email(EMAIL)
+                .profileImage("profiles/delete-save-failure.jpg")
+                .build();
+        when(mongoOperations.findAndModify(
+                any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(User.class)))
+                .thenThrow(new RuntimeException("mongo unavailable"));
+
+        assertThatThrownBy(() -> userService.deleteProfileImage(EMAIL))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("mongo unavailable");
+
+        assertThat(oldFile).exists();
     }
 }

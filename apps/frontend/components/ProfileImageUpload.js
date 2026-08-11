@@ -6,6 +6,10 @@ import CustomAvatar from '@/components/CustomAvatar';
 import { Toast } from '@/components/Toast';
 import api from '@/lib/api/client';
 import { saveStoredUser } from '@/lib/auth/authStorage';
+import { optimizeProfileImage } from '@/lib/profile/optimizeProfileImage';
+
+const PROFILE_IMAGE_RESIZE_ENABLED =
+  process.env.NEXT_PUBLIC_PROFILE_IMAGE_RESIZE_ENABLED === 'true';
 
 const ProfileImageUpload = ({ currentImage, onImageChange }) => {
   const { user } = useAuth();
@@ -55,9 +59,14 @@ const ProfileImageUpload = ({ currentImage, onImageChange }) => {
         throw new Error('인증 정보가 없습니다.');
       }
 
+      // S3 전후 성능을 분리 측정할 수 있도록 빌드 환경변수로 리사이징을 켠다.
+      const uploadFile = PROFILE_IMAGE_RESIZE_ENABLED
+        ? await optimizeProfileImage(file)
+        : file;
+
       // FormData 생성
       const formData = new FormData();
-      formData.append('profileImage', file);
+      formData.append('profileImage', uploadFile);
 
       // 파일 업로드 요청
       const response = await api.post(

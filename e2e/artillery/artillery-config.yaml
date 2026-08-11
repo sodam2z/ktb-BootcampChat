@@ -15,4 +15,4 @@ config:
 
 scenarios:
   - engine: playwright
-    flowFunction: allScenarios
+    flowFunction: profileScenario

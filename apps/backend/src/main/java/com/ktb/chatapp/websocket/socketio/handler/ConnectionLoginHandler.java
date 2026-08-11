@@ -53,8 +53,8 @@ public class ConnectionLoginHandler {
         this.roomRepository = roomRepository;
 
         // Register gauge metric for concurrent users
-        Gauge.builder("socketio.concurrent.users", connectedUsers::size)
-                .description("Current number of concurrent Socket.IO users")
+        Gauge.builder("socketio.concurrent.connections", this::localConnectionCount)
+                .description("Current Socket.IO connections on this instance")
                 .register(meterRegistry);
     }
     
@@ -80,8 +80,8 @@ public class ConnectionLoginHandler {
                 });
             });
 
-            log.info("Socket.IO user connected: {} ({}) - Total concurrent users: {}",
-                    getUserName(client), userId, connectedUsers.size());
+            log.info("Socket.IO user connected: {} ({}) - Local connections: {}",
+                    getUserName(client), userId, localConnectionCount());
 
             client.joinRooms(Set.of("user:" + userId, "socket:" + user.socketId(), "room-list"));
             
@@ -118,8 +118,8 @@ public class ConnectionLoginHandler {
             client.del("user");
             client.disconnect();
 
-            log.info("Socket.IO user disconnected: {} ({}) - Total concurrent users: {}",
-                    userName, userId, connectedUsers.size());
+            log.info("Socket.IO user disconnected: {} ({}) - Local connections: {}",
+                    userName, userId, localConnectionCount());
         } catch (Exception e) {
             log.error("Error handling Socket.IO disconnection", e);
             client.sendEvent(ERROR, Map.of(
@@ -131,6 +131,11 @@ public class ConnectionLoginHandler {
     
     private SocketUser getUserDto(SocketIOClient client) {
         return client.get("user");
+    }
+
+    private int localConnectionCount() {
+        var clients = socketIOServer.getAllClients();
+        return clients != null ? clients.size() : 0;
     }
     
     private String getUserId(SocketIOClient client) {

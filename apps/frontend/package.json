@@ -10,7 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
     "format": "prettier . --write --ignore-path .prettierignore",
-    "build:production": "test -f .env.production || { echo '.env.production 이 없습니다. cp .env.production.example .env.production 후 배포 주소로 값을 채우세요.' >&2; exit 1; } && env $(grep -vE '^[[:space:]]*(#|$)' .env.production | xargs) next build && pnpm run deploy:static",
+    "build:production": "test -f .env.production || { echo '.env.production 이 없습니다. cp .env.production.example .env.production 후 배포 주소로 값을 채우세요.' >&2; exit 1; } && env $(grep -vE '^[[:space:]]*(#|$)' .env.production | xargs) next build --webpack && pnpm run deploy:static",
     "deploy:static": "cp -r .next/static .next/standalone/apps/frontend/.next/ && cp -r public .next/standalone/apps/frontend/"
   },
   "dependencies": {

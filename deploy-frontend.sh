@@ -7,7 +7,9 @@ REMOTE_HOST="${REMOTE_HOST:-ktb-frontend}"
 REMOTE_DIR="${REMOTE_DIR:-/home/ubuntu/ktb-chat-frontend}"
 
 cd "$FRONTEND_DIR"
-pnpm build
+# NEXT_PUBLIC_* 값은 Next.js 빌드 시점에 번들에 고정된다.
+# 배포 전용 스크립트를 사용해 .env.production 누락을 배포 전에 검출한다.
+pnpm run build:production
 
 ssh "$REMOTE_HOST" "mkdir -p '$REMOTE_DIR'"
 rsync -az --delete .next/standalone/ "$REMOTE_HOST:$REMOTE_DIR/"

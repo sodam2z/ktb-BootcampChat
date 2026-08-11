@@ -36,6 +36,7 @@ vi.mock('@/lib/socket/socketClient', () => ({
   default: {
     connect: vi.fn(),
     leaveRoom: vi.fn(),
+    tryLeaveRoom: vi.fn(),
     joinRoomAndWait: vi.fn(),
     fetchPreviousMessagesAndWait: vi.fn(),
     subscribeRoomEvents: vi.fn(),
@@ -338,6 +339,21 @@ describe('useRoomHandling', () => {
     await act(async () => {
       resolveMessageLoad({ messages: [], hasMore: false });
     });
+  });
+
+  it('leaves the active room without disconnecting the shared socket on unmount', async () => {
+    const socket = createSocket();
+    socketClient.connect.mockResolvedValueOnce(socket);
+    const harness = createHarness();
+
+    await act(async () => {
+      await harness.result.current.setupRoom();
+    });
+
+    harness.unmount();
+
+    expect(socketClient.tryLeaveRoom).toHaveBeenCalledWith('room-1', socket);
+    expect(socket.disconnect).not.toHaveBeenCalled();
   });
 
   it('records setup failure through semantic reducer actions', async () => {

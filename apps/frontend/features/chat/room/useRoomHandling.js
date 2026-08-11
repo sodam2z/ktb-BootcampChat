@@ -144,24 +144,7 @@ export const useRoomHandling = ({
       }
 
       if (socketRef.current) {
-        const currentSocket = socketRef.current;
-
-        if (userRooms.current?.get(currentSocket.id)) {
-          await new Promise((resolve) => {
-            socketClient.leaveRoom(
-              userRooms.current.get(currentSocket.id),
-              currentSocket
-            );
-            setTimeout(resolve, 1000);
-          });
-          userRooms.current.delete(currentSocket.id);
-        }
-
-        currentSocket.disconnect();
-        currentSocket.removeAllListeners();
         attachSocket(null);
-
-        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
 
       const socket = await socketClient.connect({
@@ -177,7 +160,6 @@ export const useRoomHandling = ({
         timeout: 10000,
         pingTimeout: 10000,
         pingInterval: 8000,
-        forceNew: true,
         autoConnect: true,
       });
 
@@ -188,7 +170,7 @@ export const useRoomHandling = ({
       }
       throw error;
     }
-  }, [userRooms, onReplace, socketRef, attachSocket, user]);
+  }, [onReplace, socketRef, attachSocket, user]);
 
   const fetchRoomData = useCallback(
     async (roomId) => {
@@ -404,7 +386,7 @@ export const useRoomHandling = ({
           cleanup('ERROR');
 
           if (socketRef.current) {
-            socketRef.current.disconnect();
+            socketClient.tryLeaveRoom(roomId, socketRef.current);
             attachSocket(null);
           }
         }
@@ -450,14 +432,13 @@ export const useRoomHandling = ({
         roomEventsUnsubscribeRef.current = null;
       }
 
-      // 언마운트 경로는 attachSocket 을 쓰지 않는다. 사라지는 컴포넌트에
-       // 소켓 교체를 통지할 구독자가 없다.
+      // Keep the shared Socket.IO connection alive for room-list or the next room.
       if (socketRef.current) {
-        socketRef.current.disconnect();
+        socketClient.tryLeaveRoom(roomId, socketRef.current);
         socketRef.current = null;
       }
     };
-  }, []);
+  }, [roomId, socketRef]);
 
   return {
     setupRoom,

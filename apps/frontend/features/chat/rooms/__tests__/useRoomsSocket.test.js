@@ -20,6 +20,9 @@ describe('useRoomsSocket', () => {
       on: vi.fn((event, handler) => {
         handlers[event] = handler;
       }),
+      off: vi.fn((event) => {
+        delete handlers[event];
+      }),
       emit: vi.fn(),
       disconnect: vi.fn(),
     };
@@ -57,6 +60,21 @@ describe('useRoomsSocket', () => {
     await waitFor(() => expect(socket.on).toHaveBeenCalled());
 
     expect(Object.keys(handlers)).not.toContain('roomDeleted');
+  });
+
+  it('removes room-list listeners without closing the shared socket on cleanup', async () => {
+    const { unmount } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomCreated).toBeTypeOf('function'));
+
+    unmount();
+
+    expect(socket.off).toHaveBeenCalledWith('connect', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('disconnect', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('error', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomCreated', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomUpdated', expect.any(Function));
+    expect(socket.off).toHaveBeenCalledWith('roomActivity', expect.any(Function));
+    expect(socket.disconnect).not.toHaveBeenCalled();
   });
 
   it('prepends a created room on the first page and keeps only 20 rows', async () => {

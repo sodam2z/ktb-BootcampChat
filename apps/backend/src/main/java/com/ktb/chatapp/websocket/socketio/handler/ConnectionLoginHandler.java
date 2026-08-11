@@ -7,12 +7,13 @@ import com.ktb.chatapp.websocket.socketio.ConnectedUsers;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import com.ktb.chatapp.websocket.socketio.UserConnectionLocks;
 import com.ktb.chatapp.websocket.socketio.UserRooms;
+import com.ktb.chatapp.repository.RoomRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -34,6 +35,7 @@ public class ConnectionLoginHandler {
     private final UserRooms userRooms;
     private final UserConnectionLocks userConnectionLocks;
     private final RoomJoinHandler roomJoinHandler;
+    private final RoomRepository roomRepository;
 
     public ConnectionLoginHandler(
             SocketIOServer socketIOServer,
@@ -41,12 +43,14 @@ public class ConnectionLoginHandler {
             UserRooms userRooms,
             UserConnectionLocks userConnectionLocks,
             RoomJoinHandler roomJoinHandler,
+            RoomRepository roomRepository,
             MeterRegistry meterRegistry) {
         this.socketIOServer = socketIOServer;
         this.connectedUsers = connectedUsers;
         this.userRooms = userRooms;
         this.userConnectionLocks = userConnectionLocks;
         this.roomJoinHandler = roomJoinHandler;
+        this.roomRepository = roomRepository;
 
         // Register gauge metric for concurrent users
         Gauge.builder("socketio.concurrent.users", connectedUsers::size)
@@ -64,14 +68,13 @@ public class ConnectionLoginHandler {
             client.set("user", user);
 
             userConnectionLocks.withLock(userId, () -> {
-                // 다른 노드에 접속된 사용자는 통보 불가
-                notifyDuplicateLogin(client, userId);
+                // Atomic replacement works across nodes when RedisChatDataStore is active.
+                SocketUser previousUser = connectedUsers.replace(userId, user);
+                notifyDuplicateLogin(client, previousUser);
 
-                // Publish the new owner before restoring rooms. A late disconnect
-                // from the old socket must observe this socket as the active one.
-                connectedUsers.set(userId, user);
-
-                userRooms.get(userId).forEach(roomId -> {
+                roomRepository.findByParticipantIdsContaining(userId).stream()
+                        .map(com.ktb.chatapp.model.Room::getId).forEach(roomId -> {
+                    userRooms.add(userId, roomId);
                     // 재접속 시 기존 참여 방 재입장 처리
                     roomJoinHandler.handleJoinRoom(client, roomId);
                 });
@@ -80,7 +83,7 @@ public class ConnectionLoginHandler {
             log.info("Socket.IO user connected: {} ({}) - Total concurrent users: {}",
                     getUserName(client), userId, connectedUsers.size());
 
-            client.joinRooms(Set.of("user:" + userId, "room-list"));
+            client.joinRooms(Set.of("user:" + userId, "socket:" + user.socketId(), "room-list"));
             
         } catch (Exception e) {
             log.error("Error handling Socket.IO connection", e);
@@ -105,16 +108,13 @@ public class ConnectionLoginHandler {
             userConnectionLocks.withLock(userId, () -> {
                 // Disconnect only releases connection ownership. Room membership
                 // is persistent and is removed exclusively by an explicit LEAVE_ROOM.
-                var socketUser = connectedUsers.get(userId);
-                if (socketUser != null && socketId.equals(socketUser.socketId())) {
-                    connectedUsers.del(userId);
-                } else {
+                if (!connectedUsers.delIfCurrent(userId, getUserDto(client))) {
                     log.info("Socket.IO disconnect: User {} has a different active connection. "
                             + "Skipping connection cleanup.", userId);
                 }
             });
 
-            client.leaveRooms(Set.of("user:" + userId, "room-list"));
+            client.leaveRooms(Set.of("user:" + userId, "socket:" + socketId, "room-list"));
             client.del("user");
             client.disconnect();
 
@@ -143,40 +143,23 @@ public class ConnectionLoginHandler {
         return user != null ? user.name() : null;
     }
     
-    /**
-     * TODO 멀티 클러스터에서 동작 안함
-     * socketIOServer.getRoomOperations("user:" + userId) 로 처리 변경.
-     */
-    private void notifyDuplicateLogin(SocketIOClient client, String userId) {
-        var socketUser = connectedUsers.get(userId);
-        if (socketUser == null) {
+    private void notifyDuplicateLogin(SocketIOClient client, SocketUser previousUser) {
+        if (previousUser == null) {
             return;
         }
-        String existingSocketId = socketUser.socketId();
-        SocketIOClient existingClient = socketIOServer.getClient(UUID.fromString(existingSocketId));
-        if (existingClient == null) {
-            return;
-        }
-        
-        // Send duplicate login notification
-        existingClient.sendEvent(DUPLICATE_LOGIN, Map.of(
+
+        String targetRoom = "socket:" + previousUser.socketId();
+        socketIOServer.getRoomOperations(targetRoom).sendEvent(DUPLICATE_LOGIN, Map.of(
                 "type", "new_login_attempt",
                 "deviceInfo", client.getHandshakeData().getHttpHeaders().get("User-Agent"),
                 "ipAddress", client.getRemoteAddress().toString(),
                 "timestamp", System.currentTimeMillis()
         ));
-        
-        new Thread(() -> {
-            try {
-                Thread.sleep(Duration.ofSeconds(10));
-                existingClient.sendEvent(SESSION_ENDED, Map.of(
+
+        CompletableFuture.delayedExecutor(Duration.ofSeconds(10).toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS)
+                .execute(() -> socketIOServer.getRoomOperations(targetRoom).sendEvent(SESSION_ENDED, Map.of(
                         "reason", "duplicate_login",
                         "message", "다른 기기에서 로그인하여 현재 세션이 종료되었습니다."
-                ));
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                log.error("Error in duplicate login notification thread", e);
-            }
-        }).start();
+                )));
     }
 }

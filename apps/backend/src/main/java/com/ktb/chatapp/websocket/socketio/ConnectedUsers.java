@@ -20,9 +20,17 @@ public class ConnectedUsers {
     public void set(String userId, SocketUser sockerUser) {
         chatDataStore.set(buildKey(userId), sockerUser);
     }
+
+    public SocketUser replace(String userId, SocketUser socketUser) {
+        return chatDataStore.getAndSet(buildKey(userId), socketUser, SocketUser.class);
+    }
     
     public void del(String userId) {
         chatDataStore.delete(buildKey(userId));
+    }
+
+    public boolean delIfCurrent(String userId, SocketUser socketUser) {
+        return chatDataStore.compareAndDelete(buildKey(userId), socketUser);
     }
     
     public int size() {

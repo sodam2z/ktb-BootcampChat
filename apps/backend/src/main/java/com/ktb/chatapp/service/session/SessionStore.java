@@ -32,6 +32,8 @@ public interface SessionStore {
      * @return the stored session
      */
     Session replaceByUserId(Session session);
+
+    Optional<Session> touch(String userId, String sessionId, long lastActivity, java.time.Instant expiresAt);
     
     /**
      * Delete all sessions for a user

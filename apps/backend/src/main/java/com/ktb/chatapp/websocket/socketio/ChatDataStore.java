@@ -25,6 +25,12 @@ public interface ChatDataStore {
      * @param value the value to store
      */
     void set(String key, Object value);
+
+    default <T> T getAndSet(String key, T value, Class<T> type) {
+        T previous = get(key, type).orElse(null);
+        set(key, value);
+        return previous;
+    }
     
     /**
      * Delete a value by key
@@ -32,6 +38,37 @@ public interface ChatDataStore {
      * @param key the storage key
      */
     void delete(String key);
+
+    default boolean compareAndDelete(String key, Object expectedValue) {
+        Optional<Object> current = get(key, Object.class);
+        if (current.isPresent() && current.get().equals(expectedValue)) {
+            delete(key);
+            return true;
+        }
+        return false;
+    }
+
+    default java.util.Set<String> getSet(String key) {
+        return get(key, java.util.Set.class)
+                .map(value -> new java.util.HashSet<>((java.util.Set<String>) value))
+                .orElseGet(java.util.HashSet::new);
+    }
+
+    default void addToSet(String key, String value) {
+        java.util.Set<String> values = getSet(key);
+        values.add(value);
+        set(key, values);
+    }
+
+    default void removeFromSet(String key, String value) {
+        java.util.Set<String> values = getSet(key);
+        values.remove(value);
+        if (values.isEmpty()) {
+            delete(key);
+        } else {
+            set(key, values);
+        }
+    }
     
     int size();
 }

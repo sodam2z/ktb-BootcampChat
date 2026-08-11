@@ -2,6 +2,8 @@ package com.ktb.chatapp.service.ratelimit;
 
 import com.ktb.chatapp.model.RateLimit;
 import java.util.Optional;
+import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Data store interface for rate limit storage.
@@ -24,4 +26,21 @@ public interface RateLimitStore {
      * @return the saved rate limit
      */
     RateLimit save(RateLimit rateLimit);
+
+    default RateLimitConsumption consume(String clientId, int maxRequests, Duration window, Instant now) {
+        RateLimit rateLimit = findByClientId(clientId).orElse(null);
+        Instant expiresAt = now.plus(window);
+        if (rateLimit == null) {
+            rateLimit = RateLimit.builder().clientId(clientId).count(1).expiresAt(expiresAt).build();
+        } else if (!rateLimit.getExpiresAt().isAfter(now)) {
+            rateLimit.setCount(1);
+            rateLimit.setExpiresAt(expiresAt);
+        } else if (rateLimit.getCount() >= maxRequests) {
+            return new RateLimitConsumption(rateLimit.getCount(), rateLimit.getExpiresAt(), false);
+        } else {
+            rateLimit.setCount(rateLimit.getCount() + 1);
+        }
+        RateLimit saved = save(rateLimit);
+        return new RateLimitConsumption(saved.getCount(), saved.getExpiresAt(), true);
+    }
 }

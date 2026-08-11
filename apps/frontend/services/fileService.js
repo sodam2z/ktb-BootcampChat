@@ -160,7 +160,7 @@ async uploadFile(file, onProgress, token, sessionId) {
         headers: {
           'Content-Type': uploadFile.type,
           'Cache-Control':
-            'private, no-cache, no-store, must-revalidate'
+            'private, max-age=300'
         },
         timeout: 30000,
         cancelToken: source.token,
@@ -238,6 +238,11 @@ async uploadFile(file, onProgress, token, sessionId) {
       };
     }
 
+    const presignStatus = error.response?.status ?? error.status;
+    if (presignStatus === 400 || presignStatus === 409) {
+      return this.uploadFileLegacy(uploadFile, onProgress, source);
+    }
+
     if (error.response?.status === 401) {
       throw new Error(
         'Authentication expired. Please login again.'
@@ -250,6 +255,67 @@ async uploadFile(file, onProgress, token, sessionId) {
     this.activeUploads.delete(file.name);
   }
 }
+
+  async uploadFileLegacy(file, onProgress, source) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const uploadUrl = this.baseUrl
+      ? `${this.baseUrl}/api/files/upload`
+      : '/api/files/upload';
+
+    try {
+      const response = await axiosInstance.post(uploadUrl, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 30000,
+        cancelToken: source.token,
+        withCredentials: true,
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const percentCompleted = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            );
+            onProgress(percentCompleted);
+          }
+        }
+      });
+
+      if (!response.data?.success || !response.data?.file) {
+        return {
+          success: false,
+          message: response.data?.message || '파일 업로드에 실패했습니다.'
+        };
+      }
+
+      const fileData = response.data.file;
+      return {
+        success: true,
+        data: {
+          ...response.data,
+          file: {
+            ...fileData,
+            url: this.getFileUrl(fileData.filename, true)
+          }
+        }
+      };
+    } catch (error) {
+      if (isCancel(error)) {
+        return {
+          success: false,
+          message: '업로드가 취소되었습니다.'
+        };
+      }
+
+      if (error.response?.status === 401) {
+        throw new Error('Authentication expired. Please login again.');
+      }
+
+      return this.handleUploadError(error);
+    }
+  }
+
   getFileUrl(filename, forPreview = false) {
     if (!filename) return '';
 

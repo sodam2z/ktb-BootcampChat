@@ -3,21 +3,25 @@ package com.ktb.chatapp.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.model.Message;
-import com.ktb.chatapp.model.Room;
+import com.ktb.chatapp.exception.FileAccessException;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
+import com.ktb.chatapp.repository.RoomAccessResult;
 import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.storage.StoragePort;
 import com.ktb.chatapp.storage.StoredObject;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +61,8 @@ class FileAccessServiceTest {
     @Mock
     private RoomRepository roomRepository;
 
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
     @Test
     @DisplayName("참가자 + 오프로딩 지원 스토리지 → Redirect로 오프로딩된다")
     void forDownload_participantWithOffloadSupport_returnsRedirect() {
@@ -69,6 +75,14 @@ class FileAccessServiceTest {
         assertThat(((FileAccess.Redirect) access).location()).isEqualTo(OFFLOADED_URL);
         assertThat(storage.offloadedKey).isEqualTo(KEY);
         assertThat(storage.openCalls).isZero();
+        verify(messageRepository).findRoomOnlyByFileId(FILE_ID);
+        verify(messageRepository, never()).findByFileId(FILE_ID);
+        assertThat(meterRegistry.get("file.access.authorization.duration")
+                .tags("operation", "download", "outcome", "allowed", "reason", "participant")
+                .timer().count()).isEqualTo(1L);
+        assertThat(meterRegistry.get("file.access.delivery.duration")
+                .tags("operation", "download", "outcome", "success", "delivery", "redirect")
+                .timer().count()).isEqualTo(1L);
     }
 
     @Test
@@ -95,11 +109,16 @@ class FileAccessServiceTest {
         FileAccessService service = serviceWith(storage, "image/png");
 
         assertThatThrownBy(() -> service.forDownload(FILE_NAME, OUTSIDER))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage("파일에 접근할 권한이 없습니다");
+                .isInstanceOfSatisfying(FileAccessException.class, exception ->
+                        assertThat(exception.getReason())
+                                .isEqualTo(FileAccessException.Reason.NOT_PARTICIPANT));
 
         assertThat(storage.offloadCalls).isZero();
         assertThat(storage.openCalls).isZero();
+        assertThat(meterRegistry.get("file.access.requests")
+                .tags("operation", "download", "outcome", "denied", "reason", "not_participant")
+                .counter()
+                .count()).isEqualTo(1.0);
     }
 
     @Test
@@ -109,8 +128,9 @@ class FileAccessServiceTest {
         FileAccessService service = serviceWith(storage, "image/png");
 
         assertThatThrownBy(() -> service.forDownload(FILE_NAME, OUTSIDER))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage("파일에 접근할 권한이 없습니다");
+                .isInstanceOfSatisfying(FileAccessException.class, exception ->
+                        assertThat(exception.getReason())
+                                .isEqualTo(FileAccessException.Reason.NOT_PARTICIPANT));
 
         assertThat(storage.openCalls).isZero();
     }
@@ -180,7 +200,9 @@ class FileAccessServiceTest {
         FileAccessService service = serviceWith(storage, "application/zip");
 
         assertThatThrownBy(() -> service.forView(FILE_NAME, OUTSIDER))
-                .hasMessage("파일에 접근할 권한이 없습니다");
+                .isInstanceOfSatisfying(FileAccessException.class, exception ->
+                        assertThat(exception.getReason())
+                                .isEqualTo(FileAccessException.Reason.NOT_PARTICIPANT));
     }
 
     @Test
@@ -188,10 +210,13 @@ class FileAccessServiceTest {
     void forDownload_missingFileEntity_throwsNotFound() {
         when(fileRepository.findByFilename(FILE_NAME)).thenReturn(Optional.empty());
         FileAccessService service = new FileAccessService(
-                new DirectStorage(), fileRepository, messageRepository, roomRepository, Optional.empty());
+                new DirectStorage(), fileRepository, messageRepository, roomRepository,
+                Optional.empty(), meterRegistry, "test-instance", "local", false);
 
         assertThatThrownBy(() -> service.forDownload(FILE_NAME, PARTICIPANT))
-                .hasMessage("파일을 찾을 수 없습니다: " + FILE_NAME);
+                .isInstanceOfSatisfying(FileAccessException.class, exception ->
+                        assertThat(exception.getReason())
+                                .isEqualTo(FileAccessException.Reason.FILE_NOT_FOUND));
     }
 
     @Test
@@ -205,13 +230,27 @@ class FileAccessServiceTest {
                 .hasMessage("파일을 찾을 수 없습니다: " + FILE_NAME);
     }
 
+    @Test
+    @DisplayName("오프로딩 필수 환경에서 local storage는 시작 전에 거부된다")
+    void constructor_requiredOffloadWithLocalStorage_rejectsConfiguration() {
+        assertThatThrownBy(() -> new FileAccessService(
+                new DirectStorage(), fileRepository, messageRepository, roomRepository,
+                Optional.empty(), meterRegistry, "test-instance", "local", true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("FILE_STORAGE_TYPE=s3");
+    }
+
     private FileAccessService serviceWith(StoragePort storagePort, String mimetype) {
         when(fileRepository.findByFilename(FILE_NAME)).thenReturn(Optional.of(fileEntity(mimetype)));
-        when(messageRepository.findByFileId(FILE_ID)).thenReturn(Optional.of(
+        when(messageRepository.findRoomOnlyByFileId(FILE_ID)).thenReturn(Optional.of(
                 Message.builder().id("message-id").roomId(ROOM_ID).fileId(FILE_ID).build()));
-        when(roomRepository.findById(ROOM_ID)).thenReturn(Optional.of(
-                Room.builder().id(ROOM_ID).participantIds(Set.of(PARTICIPANT)).build()));
-        return new FileAccessService(storagePort, fileRepository, messageRepository, roomRepository, Optional.empty());
+        lenient().when(roomRepository.findAccessById(ROOM_ID, PARTICIPANT))
+                .thenReturn(Optional.of(new RoomAccessResult(true)));
+        lenient().when(roomRepository.findAccessById(ROOM_ID, OUTSIDER))
+                .thenReturn(Optional.of(new RoomAccessResult(false)));
+        return new FileAccessService(
+                storagePort, fileRepository, messageRepository, roomRepository,
+                Optional.empty(), meterRegistry, "test-instance", "local", false);
     }
 
     private File fileEntity(String mimetype) {

@@ -1,9 +1,19 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Toast } from '@/components/Toast';
 import socketClient from '@/lib/socket/socketClient';
 
 export const useReactionHandling = ({ currentUser, messages, setMessages }) => {
   const [pendingReactions] = useState(new Map());
+  const reactionsByMessageId = useMemo(() => {
+    if (!Array.isArray(messages)) {
+      return new Map();
+    }
+
+    return new Map(messages.map((message) => [
+      message._id,
+      message.reactions || {},
+    ]));
+  }, [messages]);
 
   const handleReactionAdd = useCallback(async (messageId, reaction) => {
     try {
@@ -40,15 +50,16 @@ export const useReactionHandling = ({ currentUser, messages, setMessages }) => {
       Toast.error('리액션 추가에 실패했습니다.');
 
       // 실패 시 롤백
+      const previousReactions = reactionsByMessageId.get(messageId) || {};
       setMessages(prevMessages =>
         prevMessages.map(msg =>
           msg._id === messageId ?
-          { ...msg, reactions: messages.find(m => m._id === messageId)?.reactions || {} } :
+          { ...msg, reactions: previousReactions } :
           msg
         )
       );
     }
-  }, [currentUser, messages, setMessages]);
+  }, [currentUser, reactionsByMessageId, setMessages]);
 
   const handleReactionRemove = useCallback(async (messageId, reaction) => {
     try {
@@ -81,15 +92,16 @@ export const useReactionHandling = ({ currentUser, messages, setMessages }) => {
       Toast.error('리액션 제거에 실패했습니다.');
 
       // 실패 시 롤백
+      const previousReactions = reactionsByMessageId.get(messageId) || {};
       setMessages(prevMessages =>
         prevMessages.map(msg =>
           msg._id === messageId ?
-          { ...msg, reactions: messages.find(m => m._id === messageId)?.reactions || {} } :
+          { ...msg, reactions: previousReactions } :
           msg
         )
       );
     }
-  }, [currentUser, messages, setMessages]);
+  }, [currentUser, reactionsByMessageId, setMessages]);
 
   const handleReactionUpdate = useCallback(({ messageId, reactions }) => {
     setMessages(prevMessages =>

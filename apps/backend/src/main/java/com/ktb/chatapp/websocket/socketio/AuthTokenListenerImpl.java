@@ -70,7 +70,9 @@ public class AuthTokenListenerImpl implements AuthTokenListener {
 
             log.info("Socket.IO connection authorized for user: {} ({})", user.getName(), userId);
             
-            var socketUser = new SocketUser(user.getId(), user.getName(), sessionId, client.getSessionId().toString());
+            var socketUser = new SocketUser(
+                    user.getId(), user.getName(), sessionId, client.getSessionId().toString(),
+                    user.getEmail(), user.getProfileImage());
             socketIOChatHandlerProvider.getObject().onConnect(client, socketUser);
             return AuthTokenResult.AuthTokenResultSuccess;
         } catch (Exception e) {

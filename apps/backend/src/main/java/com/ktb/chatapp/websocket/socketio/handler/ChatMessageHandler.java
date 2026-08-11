@@ -11,8 +11,6 @@ import com.ktb.chatapp.dto.UserResponse;
 import com.ktb.chatapp.model.*;
 import com.ktb.chatapp.repository.FileRepository;
 import com.ktb.chatapp.repository.MessageRepository;
-import com.ktb.chatapp.repository.RoomRepository;
-import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.util.BannedWordChecker;
 import com.ktb.chatapp.websocket.socketio.ai.AiService;
 import com.ktb.chatapp.service.RoomActivityNotifier;
@@ -21,6 +19,7 @@ import com.ktb.chatapp.service.SessionValidationResult;
 import com.ktb.chatapp.service.RateLimitService;
 import com.ktb.chatapp.service.RateLimitCheckResult;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
+import com.ktb.chatapp.websocket.socketio.UserRooms;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -41,14 +40,13 @@ import static com.ktb.chatapp.websocket.socketio.SocketIOEvents.*;
 public class ChatMessageHandler {
     private final SocketIOServer socketIOServer;
     private final MessageRepository messageRepository;
-    private final RoomRepository roomRepository;
-    private final UserRepository userRepository;
     private final FileRepository fileRepository;
     private final AiService aiService;
     private final SessionService sessionService;
     private final RoomActivityNotifier roomActivityNotifier;
     private final BannedWordChecker bannedWordChecker;
     private final RateLimitService rateLimitService;
+    private final UserRooms userRooms;
     private final MeterRegistry meterRegistry;
     
     @OnEvent(CHAT_MESSAGE)
@@ -110,20 +108,8 @@ public class ChatMessageHandler {
         }
         
         try {
-            User sender = userRepository.findById(socketUser.id()).orElse(null);
-            if (sender == null) {
-                recordError("user_not_found");
-                client.sendEvent(ERROR, Map.of(
-                    "code", "MESSAGE_ERROR",
-                    "message", "User not found"
-                ));
-                timerSample.stop(createTimer("error", "user_not_found"));
-                return;
-            }
-
             String roomId = data.getRoom();
-            Room room = roomRepository.findById(roomId).orElse(null);
-            if (room == null || !room.getParticipantIds().contains(socketUser.id())) {
+            if (!userRooms.isInRoom(socketUser.id(), roomId)) {
                 recordError("room_access_denied");
                 client.sendEvent(ERROR, Map.of(
                     "code", "MESSAGE_ERROR",
@@ -162,7 +148,7 @@ public class ChatMessageHandler {
             }
 
             Message savedMessage = messageRepository.save(message);
-            MessageResponse messageResponse = createMessageResponse(savedMessage, sender);
+            MessageResponse messageResponse = createMessageResponse(savedMessage, socketUser);
 
             socketIOServer.getRoomOperations(roomId)
                     .sendEvent(MESSAGE, messageResponse);
@@ -239,7 +225,7 @@ public class ChatMessageHandler {
         return message;
     }
 
-    private MessageResponse createMessageResponse(Message message, User sender) {
+    private MessageResponse createMessageResponse(Message message, SocketUser sender) {
         var messageResponse = new MessageResponse();
         messageResponse.setId(message.getId());
         messageResponse.setRoomId(message.getRoomId());

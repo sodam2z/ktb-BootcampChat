@@ -64,6 +64,10 @@ public interface ChatDataStore {
         set(key, values);
     }
 
+    default boolean setContains(String key, String value) {
+        return getSet(key).contains(value);
+    }
+
     default void removeFromSet(String key, String value) {
         java.util.Set<String> values = getSet(key);
         values.remove(value);

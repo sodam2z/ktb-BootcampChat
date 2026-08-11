@@ -67,7 +67,7 @@ public class UserRooms {
      * @return true if the user is in the room, false otherwise
      */
     public boolean isInRoom(String userId, String roomId) {
-        return get(userId).contains(roomId);
+        return chatDataStore.setContains(buildKey(userId), roomId);
     }
 
     private String buildKey(String userId) {

@@ -9,7 +9,7 @@ const ErrorPage = () => {
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet" />
       </Head>
-      <style jsx global>{`
+      <style>{`
         /* 모든 전역 CSS 리셋 (_app.js의 globals.css, Vapor UI 등) */
         html, body, div, span, h1, p, img, br {
           all: revert;

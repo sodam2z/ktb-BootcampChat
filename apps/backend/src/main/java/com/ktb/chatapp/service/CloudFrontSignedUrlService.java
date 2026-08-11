@@ -71,22 +71,29 @@ public class CloudFrontSignedUrlService {
         String resourceUrl =
                 baseUrl + "/" + normalizeObjectKey(objectKey);
 
-        CannedSignerRequest request =
-                CannedSignerRequest.builder()
-                        .resourceUrl(resourceUrl)
-                        .privateKey(privateKeyPath)
-                        .keyPairId(keyPairId)
-                        .expirationDate(
-                                Instant.now().plus(urlTtl)
-                        )
-                        .build();
+        try {
+            CannedSignerRequest request =
+                    CannedSignerRequest.builder()
+                            .resourceUrl(resourceUrl)
+                            .privateKey(privateKeyPath)
+                            .keyPairId(keyPairId)
+                            .expirationDate(
+                                    Instant.now().plus(urlTtl)
+                            )
+                            .build();
 
-        String signedUrl =
-                cloudFrontUtilities
-                        .getSignedUrlWithCannedPolicy(request)
-                        .url();
+            String signedUrl =
+                    cloudFrontUtilities
+                            .getSignedUrlWithCannedPolicy(request)
+                            .url();
 
-        return URI.create(signedUrl);
+            return URI.create(signedUrl);
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Failed to create CloudFront signed URL.",
+                    e
+            );
+        }
     }
 
     private static String normalizeBaseUrl(String baseUrl) {

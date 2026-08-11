@@ -17,6 +17,7 @@ describe('useRoomsSocket', () => {
     vi.clearAllMocks();
     handlers = {};
     socket = {
+      connected: true,
       on: vi.fn((event, handler) => {
         handlers[event] = handler;
       }),
@@ -43,13 +44,13 @@ describe('useRoomsSocket', () => {
     return { ...result, setRooms, setMetadata };
   };
 
-  it('does not emit joinRoomList because the server joins room-list on connect', async () => {
+  it('subscribes only while the room-list screen is mounted', async () => {
     renderRoomsSocket();
     await waitFor(() => expect(handlers.connect).toBeTypeOf('function'));
 
     act(() => handlers.connect());
 
-    expect(socket.emit).not.toHaveBeenCalledWith('joinRoomList');
+    expect(socket.emit).toHaveBeenCalledWith('joinRoomList');
   });
 
   it('does not register roomDeleted without a server-side room delete event', async () => {

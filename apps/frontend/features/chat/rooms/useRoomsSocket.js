@@ -48,6 +48,7 @@ export const useRoomsSocket = ({
         const handlers = {
           connect: () => {
             setConnectionStatus(CONNECTION_STATUS.CONNECTED);
+            socket.emit('joinRoomList');
           },
           disconnect: () => {
             setConnectionStatus(CONNECTION_STATUS.DISCONNECTED);
@@ -96,6 +97,7 @@ export const useRoomsSocket = ({
         Object.entries(handlers).forEach(([event, handler]) => {
           socket.on(event, handler);
         });
+        socket.emit('joinRoomList');
       } catch (error) {
         if (!isSubscribed) return;
 
@@ -115,6 +117,9 @@ export const useRoomsSocket = ({
     return () => {
       isSubscribed = false;
       if (socketRef.current) {
+        if (socketRef.current.connected) {
+          socketRef.current.emit('leaveRoomList');
+        }
         socketRef.current.disconnect();
         socketRef.current = null;
       }

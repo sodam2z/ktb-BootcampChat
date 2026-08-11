@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(name = "socketio.enabled", havingValue = "true", matchIfMissing = true)
 public class PresenceLeaseRefresher {
 
+    private static final String LAST_REFRESH_AT = "presenceLeaseRefreshedAt";
+    private static final long REFRESH_INTERVAL_MILLIS = java.time.Duration.ofMinutes(5).toMillis();
+
     private final ConnectedUsers connectedUsers;
 
     public PresenceLeaseRefresher(SocketIOServer socketIOServer, ConnectedUsers connectedUsers) {
@@ -21,7 +24,14 @@ public class PresenceLeaseRefresher {
 
     void onPong(SocketIOClient client) {
         SocketUser socketUser = client.get("user");
-        if (socketUser != null && !connectedUsers.refreshIfCurrent(socketUser)) {
+        Long lastRefreshAt = client.get(LAST_REFRESH_AT);
+        long now = System.currentTimeMillis();
+        if (socketUser == null || (lastRefreshAt != null && now - lastRefreshAt < REFRESH_INTERVAL_MILLIS)) {
+            return;
+        }
+
+        client.set(LAST_REFRESH_AT, now);
+        if (!connectedUsers.refreshIfCurrent(socketUser)) {
             log.debug("Skipped stale presence lease refresh: userId={}, socketId={}",
                     socketUser.id(), socketUser.socketId());
         }

@@ -35,6 +35,10 @@ public final class SocketIOEvents {
      */
     public static final String LEAVE_ROOM = "leaveRoom";
 
+    /** Subscribe/unsubscribe to global room-list updates while that screen is visible. */
+    public static final String JOIN_ROOM_LIST = "joinRoomList";
+    public static final String LEAVE_ROOM_LIST = "leaveRoomList";
+
     /**
      * 이전 메시지 로드 요청
      * Payload: { roomId, before }

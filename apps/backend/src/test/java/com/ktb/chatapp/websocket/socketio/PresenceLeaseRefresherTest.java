@@ -31,6 +31,8 @@ class PresenceLeaseRefresherTest {
         listener.getValue().onPong(client);
 
         verify(connectedUsers).refreshIfCurrent(user);
+        verify(client).set(org.mockito.ArgumentMatchers.eq("presenceLeaseRefreshedAt"),
+                org.mockito.ArgumentMatchers.anyLong());
     }
 
     @Test
@@ -40,6 +42,20 @@ class PresenceLeaseRefresherTest {
         verify(socketIOServer).addPongListener(listener.capture());
 
         when(client.get("user")).thenReturn(null);
+        listener.getValue().onPong(client);
+
+        verify(connectedUsers, never()).refreshIfCurrent(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void frequentPongsDoNotRefreshPresenceAgain() {
+        SocketUser user = new SocketUser("user-1", "name", "session-1", "socket-1");
+        ArgumentCaptor<PongListener> listener = ArgumentCaptor.forClass(PongListener.class);
+        new PresenceLeaseRefresher(socketIOServer, connectedUsers);
+        verify(socketIOServer).addPongListener(listener.capture());
+
+        when(client.get("user")).thenReturn(user);
+        when(client.get("presenceLeaseRefreshedAt")).thenReturn(System.currentTimeMillis());
         listener.getValue().onPong(client);
 
         verify(connectedUsers, never()).refreshIfCurrent(org.mockito.ArgumentMatchers.any());

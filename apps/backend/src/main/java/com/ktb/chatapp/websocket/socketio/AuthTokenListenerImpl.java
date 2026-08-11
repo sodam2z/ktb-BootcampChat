@@ -68,7 +68,7 @@ public class AuthTokenListenerImpl implements AuthTokenListener {
                 return new AuthTokenResult(false, Map.of("message", "User not found"));
             }
 
-            log.info("Socket.IO connection authorized for user: {} ({})", user.getName(), userId);
+            log.debug("Socket.IO connection authorized for user: {} ({})", user.getName(), userId);
             
             var socketUser = new SocketUser(
                     user.getId(), user.getName(), sessionId, client.getSessionId().toString(),

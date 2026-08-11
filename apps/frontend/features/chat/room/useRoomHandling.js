@@ -250,33 +250,6 @@ export const useRoomHandling = ({
     [socketRef, mountedRef, userRooms]
   );
 
-  // 재연결 뒤 필요한 것은 방 참가 상태 복구뿐이다. socket.io 가 같은 소켓을
-  // 되살렸으므로 방 이벤트 구독도 그대로 살아 있다 — 여기서 소켓을 새로 만들면
-  // 살아 있는 연결을 버리는 셈이 된다.
-  const rejoinRoom = useCallback(async () => {
-    const socket = socketRef.current;
-    if (!roomId || !mountedRef.current || !socket?.connected) {
-      return;
-    }
-
-    const joinResult = await joinRoom(roomId);
-
-    if (Array.isArray(joinResult?.messages)) {
-      processMessages(joinResult.messages, joinResult.hasMore, true);
-    }
-
-    if (mountedRef.current) {
-      setupCompleteRef.current = true;
-    }
-  }, [
-    roomId,
-    socketRef,
-    mountedRef,
-    setupCompleteRef,
-    joinRoom,
-    processMessages,
-  ]);
-
   const loadInitialMessages = useCallback(
     async (roomId) => {
       const loadMessagesWithRetry = async (retryCount = 0) => {
@@ -324,6 +297,40 @@ export const useRoomHandling = ({
     },
     [socketRef, attachSocket, processMessages, setupSocket]
   );
+
+  const loadInitialMessagesInBackground = useCallback(
+    (targetRoomId) => {
+      loadInitialMessages(targetRoomId).catch((error) => {
+        if (mountedRef.current) {
+          setError(error.message || '메시지를 불러오지 못했습니다.');
+        }
+      });
+    },
+    [loadInitialMessages, mountedRef, setError]
+  );
+
+  // 재연결 뒤에는 Socket room 참가 상태를 먼저 복구하고, 놓친 메시지는
+  // 입장 ACK를 막지 않도록 별도로 조회한다.
+  const rejoinRoom = useCallback(async () => {
+    const socket = socketRef.current;
+    if (!roomId || !mountedRef.current || !socket?.connected) {
+      return;
+    }
+
+    await joinRoom(roomId);
+
+    if (mountedRef.current) {
+      setupCompleteRef.current = true;
+      loadInitialMessagesInBackground(roomId);
+    }
+  }, [
+    roomId,
+    socketRef,
+    mountedRef,
+    setupCompleteRef,
+    joinRoom,
+    loadInitialMessagesInBackground,
+  ]);
 
   const setupRoom = useCallback(async () => {
     if (setupPromiseRef.current) {
@@ -379,18 +386,13 @@ export const useRoomHandling = ({
 
         // 4. Join Room and Load Messages
         if (mountedRef.current && socketRef.current?.connected) {
-          const joinResult = await joinRoom(roomId);
-
-          if (Array.isArray(joinResult?.messages)) {
-            processMessages(joinResult.messages, joinResult.hasMore, true);
-          } else {
-            await loadInitialMessages(roomId);
-          }
+          await joinRoom(roomId);
         }
 
         if (mountedRef.current) {
           setupCompleteRef.current = true;
           setupSucceeded(roomData);
+          loadInitialMessagesInBackground(roomId);
         }
       } catch (error) {
         if (mountedRef.current) {
@@ -426,8 +428,7 @@ export const useRoomHandling = ({
     setupSocket,
     fetchRoomData,
     joinRoom,
-    loadInitialMessages,
-    processMessages,
+    loadInitialMessagesInBackground,
     cleanup,
     setupEventListeners,
     setupStarted,

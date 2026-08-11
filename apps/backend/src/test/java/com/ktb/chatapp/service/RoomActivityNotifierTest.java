@@ -23,15 +23,17 @@ class RoomActivityNotifierTest {
 
     @Mock private RecentMessageCounter recentMessageCounter;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private RoomActivityDebouncer roomActivityDebouncer;
 
     private RoomActivityNotifier notifier() {
-        return new RoomActivityNotifier(recentMessageCounter, eventPublisher);
+        return new RoomActivityNotifier(recentMessageCounter, eventPublisher, roomActivityDebouncer);
     }
 
     @Test
     void flushPublishesRecentMessageCount() {
         when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
                 .thenReturn(Map.of("room-1", 7));
+        when(roomActivityDebouncer.tryAcquire("room-1")).thenReturn(true);
         RoomActivityNotifier notifier = notifier();
 
         notifier.notifyMessageStored("room-1");
@@ -47,6 +49,7 @@ class RoomActivityNotifierTest {
     void flushCoalescesRepeatedNotificationsForSameRoom() {
         when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
                 .thenReturn(Map.of("room-1", 3));
+        when(roomActivityDebouncer.tryAcquire("room-1")).thenReturn(true);
         RoomActivityNotifier notifier = notifier();
 
         notifier.notifyMessageStored("room-1");
@@ -72,6 +75,7 @@ class RoomActivityNotifierTest {
         when(recentMessageCounter.countRecentMessagesByRoomIds(Set.of("room-1")))
                 .thenThrow(new RuntimeException("mongo down"))
                 .thenReturn(Map.of("room-1", 1));
+        when(roomActivityDebouncer.tryAcquire("room-1")).thenReturn(true);
         RoomActivityNotifier notifier = notifier();
 
         notifier.notifyMessageStored("room-1");
@@ -81,5 +85,16 @@ class RoomActivityNotifierTest {
         notifier.flushPendingRoomActivities();
         verify(recentMessageCounter, times(2)).countRecentMessagesByRoomIds(Set.of("room-1"));
         verify(eventPublisher).publishEvent(any(RoomActivityEvent.class));
+    }
+
+    @Test
+    void distributedDebounceSkipsDuplicateAggregation() {
+        when(roomActivityDebouncer.tryAcquire("room-1")).thenReturn(false);
+        RoomActivityNotifier notifier = notifier();
+
+        notifier.notifyMessageStored("room-1");
+        notifier.flushPendingRoomActivities();
+
+        verifyNoInteractions(recentMessageCounter, eventPublisher);
     }
 }

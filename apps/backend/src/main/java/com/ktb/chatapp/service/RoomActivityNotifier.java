@@ -22,6 +22,7 @@ public class RoomActivityNotifier {
 
     private final RecentMessageCounter recentMessageCounter;
     private final ApplicationEventPublisher eventPublisher;
+    private final RoomActivityDebouncer roomActivityDebouncer;
 
     private final Set<String> pendingRoomIds =
             ConcurrentHashMap.newKeySet();
@@ -42,7 +43,7 @@ public class RoomActivityNotifier {
      * 짧은 주기로 변경된 채팅방의 최근 메시지 수를
      * 한 번의 집계 쿼리로 조회한다.
      */
-    @Scheduled(fixedDelay = 100)
+    @Scheduled(fixedDelayString = "${room-activity.flush-delay:1s}")
     void flushPendingRoomActivities() {
         if (pendingRoomIds.isEmpty()) {
             return;
@@ -56,6 +57,11 @@ public class RoomActivityNotifier {
             }
         }
 
+        if (roomIds.isEmpty()) {
+            return;
+        }
+
+        roomIds.removeIf(roomId -> !roomActivityDebouncer.tryAcquire(roomId));
         if (roomIds.isEmpty()) {
             return;
         }

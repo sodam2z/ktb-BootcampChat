@@ -43,6 +43,12 @@ public class SocketIOConfig {
     @Value("${socketio.store.type:redis}")
     private String storeType;
 
+    @Value("${socketio.server.accept-backlog:1024}")
+    private int acceptBacklog;
+
+    @Value("${socketio.server.tcp-no-delay:true}")
+    private boolean tcpNoDelay;
+
     @Bean(initMethod = "start", destroyMethod = "stop")
     public SocketIOServer socketIOServer(AuthTokenListener authTokenListener, MeterRegistry meterRegistry,
             ObjectProvider<RedissonClient> redissonClientProvider) {
@@ -50,12 +56,7 @@ public class SocketIOConfig {
         config.setHostname(host);
         config.setPort(port);
         
-        var socketConfig = new SocketConfig();
-        socketConfig.setReuseAddress(true);
-        socketConfig.setTcpNoDelay(false);
-        socketConfig.setAcceptBackLog(10);
-        socketConfig.setTcpSendBufferSize(4096);
-        socketConfig.setTcpReceiveBufferSize(4096);
+        var socketConfig = createSocketConfig(acceptBacklog, tcpNoDelay);
         config.setSocketConfig(socketConfig);
 
         config.setOrigin(origin);
@@ -93,6 +94,19 @@ public class SocketIOConfig {
         });
         
         return socketIOServer;
+    }
+
+    static SocketConfig createSocketConfig(int acceptBacklog, boolean tcpNoDelay) {
+        if (acceptBacklog < 1) {
+            throw new IllegalArgumentException("socketio.server.accept-backlog must be positive");
+        }
+        var socketConfig = new SocketConfig();
+        socketConfig.setReuseAddress(true);
+        socketConfig.setTcpNoDelay(tcpNoDelay);
+        socketConfig.setAcceptBackLog(acceptBacklog);
+        socketConfig.setTcpSendBufferSize(4096);
+        socketConfig.setTcpReceiveBufferSize(4096);
+        return socketConfig;
     }
     
     /**

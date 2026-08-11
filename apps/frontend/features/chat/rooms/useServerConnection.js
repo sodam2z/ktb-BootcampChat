@@ -38,6 +38,10 @@ export const useServerConnection = () => {
       const response = await axiosInstance.get('/api/health', {
         timeout: HEALTH_TIMEOUT_MS,
         retries: 1,
+        skipAuth: true,
+        headers: {
+          'Content-Type': undefined,
+        },
       });
 
       if (response?.status === 401) {

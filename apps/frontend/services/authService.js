@@ -3,6 +3,9 @@ import api, { getAuthHeaders, HEALTH_TIMEOUT_MS } from '../lib/api/client';
 import { loadStoredUser } from '../lib/auth/authStorage';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const HEALTH_CACHE_KEY = 'auth.server-health';
+const HEALTH_SUCCESS_TTL_MS = 30_000;
+const HEALTH_FAILURE_TTL_MS = 5_000;
 
 // 유효성 검증 함수
 const validateCredentials = (credentials) => {
@@ -220,24 +223,46 @@ class AuthService {
   }
 
   async checkServerConnection() {
+    // 클라이언트에서만 실행되도록 확인
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    // API_URL이 없으면 연결 실패로 처리
+    if (!API_URL) {
+      throw new Error('API URL이 설정되지 않았습니다.');
+    }
+
+    const cachedStatus = this._readHealthCache();
+    if (cachedStatus) {
+      if (cachedStatus.connected) {
+        return true;
+      }
+
+      throw new Error('최근 서버 연결 확인에 실패했습니다.');
+    }
+
     try {
-      // 클라이언트에서만 실행되도록 확인
-      if (typeof window === 'undefined') {
-        return false;
-      }
-
-      // API_URL이 없으면 연결 실패로 처리
-      if (!API_URL) {
-        throw new Error('API URL이 설정되지 않았습니다.');
-      }
-
       const response = await api.get('/api/health', {
         timeout: HEALTH_TIMEOUT_MS,
-        validateStatus: (status) => status < 500 // 5xx 에러만 실제 에러로 처리
+        validateStatus: (status) => status < 500, // 5xx 에러만 실제 에러로 처리
+        skipAuth: true,
+        headers: {
+          'Content-Type': undefined,
+        },
       });
 
-      return response.data?.status === 'ok' || response.status === 200;
+      const connected = response.data?.status === 'ok' || response.status === 200;
+      this._writeHealthCache(connected);
+
+      if (!connected) {
+        throw new Error('서버 상태를 확인할 수 없습니다.');
+      }
+
+      return true;
     } catch (error) {
+      this._writeHealthCache(false);
+
       // 네트워크 에러나 타임아웃은 더 구체적인 메시지 제공
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
         throw new Error('서버 응답 시간이 초과되었습니다.');
@@ -248,6 +273,43 @@ class AuthService {
       }
       
       throw this._handleError(error);
+    }
+  }
+
+  _readHealthCache() {
+    try {
+      const cachedValue = window.sessionStorage.getItem(HEALTH_CACHE_KEY);
+      if (!cachedValue) {
+        return null;
+      }
+
+      const cachedStatus = JSON.parse(cachedValue);
+      const isValid =
+        typeof cachedStatus?.connected === 'boolean' &&
+        Number.isFinite(cachedStatus?.expiresAt) &&
+        cachedStatus.expiresAt > Date.now();
+
+      if (isValid) {
+        return cachedStatus;
+      }
+
+      window.sessionStorage.removeItem(HEALTH_CACHE_KEY);
+    } catch (error) {
+      // sessionStorage를 사용할 수 없으면 캐시 없이 health를 확인한다.
+    }
+
+    return null;
+  }
+
+  _writeHealthCache(connected) {
+    try {
+      const ttl = connected ? HEALTH_SUCCESS_TTL_MS : HEALTH_FAILURE_TTL_MS;
+      window.sessionStorage.setItem(
+        HEALTH_CACHE_KEY,
+        JSON.stringify({ connected, expiresAt: Date.now() + ttl })
+      );
+    } catch (error) {
+      // sessionStorage를 사용할 수 없어도 실제 health 결과는 그대로 반환한다.
     }
   }
 

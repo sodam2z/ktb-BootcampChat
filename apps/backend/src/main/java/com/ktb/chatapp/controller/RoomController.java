@@ -165,7 +165,7 @@ public class RoomController {
             }
 
             Room savedRoom = roomService.createRoom(createRoomRequest, principal.getName());
-            RoomResponse roomResponse = mapToRoomResponse(savedRoom, principal.getName());
+            RoomResponse roomResponse = mapToRoomResponse(savedRoom, principal.getName(), false);
 
             return ResponseEntity.status(201).body(
                 Map.of(
@@ -201,7 +201,10 @@ public class RoomController {
             content = @Content(schema = @Schema(implementation = StandardResponse.class)))
     })
     @GetMapping("/{roomId}")
-    public ResponseEntity<?> getRoomById(@Parameter(description = "채팅방 ID", example = "60d5ec49f1b2c8b9e8c4f2a1") @PathVariable String roomId, Principal principal) {
+    public ResponseEntity<?> getRoomById(
+            @Parameter(description = "채팅방 ID", example = "60d5ec49f1b2c8b9e8c4f2a1") @PathVariable String roomId,
+            @RequestParam(defaultValue = "true") boolean includeRecentCount,
+            Principal principal) {
         try {
             Optional<Room> roomOpt = roomService.findRoomById(roomId);
             if (roomOpt.isEmpty()) {
@@ -211,7 +214,7 @@ public class RoomController {
             }
 
             Room room = roomOpt.get();
-            RoomResponse roomResponse = mapToRoomResponse(room, principal.getName());
+            RoomResponse roomResponse = mapToRoomResponse(room, principal.getName(), includeRecentCount);
 
             return ResponseEntity.ok(
                 Map.of(
@@ -255,7 +258,7 @@ public class RoomController {
                         .body(StandardResponse.error("채팅방을 찾을 수 없습니다."));
             }
 
-            RoomResponse roomResponse = mapToRoomResponse(joinedRoom, principal.getName());
+            RoomResponse roomResponse = mapToRoomResponse(joinedRoom, principal.getName(), false);
             
             return ResponseEntity.ok(
                 Map.of(
@@ -280,7 +283,7 @@ public class RoomController {
         }
     }
 
-    private RoomResponse mapToRoomResponse(Room room, String name) {
+    private RoomResponse mapToRoomResponse(Room room, String name, boolean includeRecentCount) {
         LinkedHashSet<String> responseUserIds = new LinkedHashSet<>(room.getParticipantIds());
         responseUserIds.add(room.getCreator());
         Map<String, User> usersById = loadUsersById(responseUserIds);
@@ -298,7 +301,9 @@ public class RoomController {
 
         boolean isCreator = room.getCreator().equals(name) || creator.getEmail().equalsIgnoreCase(name);
 
-        int recentMessageCount = recentMessageCounter.countRecentMessages(room.getId());
+        int recentMessageCount = includeRecentCount
+                ? recentMessageCounter.countRecentMessages(room.getId())
+                : 0;
 
         return RoomResponse.builder()
                 .id(room.getId())

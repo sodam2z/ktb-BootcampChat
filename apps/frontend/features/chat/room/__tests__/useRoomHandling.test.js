@@ -246,7 +246,12 @@ describe('useRoomHandling', () => {
     });
 
     expect(socketClient.connect).toHaveBeenCalledTimes(1);
-    expect(api.get).toHaveBeenCalledWith('/api/rooms/room-1', expect.any(Object));
+    expect(api.get).toHaveBeenCalledWith(
+      '/api/rooms/room-1',
+      expect.objectContaining({
+        params: { includeRecentCount: false },
+      }),
+    );
     expect(socketClient.subscribeRoomEvents).toHaveBeenCalledWith(
       harness.socketRef.current,
       expect.objectContaining({

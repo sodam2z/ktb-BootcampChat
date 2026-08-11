@@ -62,8 +62,10 @@ public class ConnectionLoginHandler {
                 notifyDuplicateLogin(client, previousUser);
             });
 
-            log.info("Socket.IO user connected: {} ({}) - Local connections: {}",
-                    getUserName(client), userId, localConnectionCount());
+            if (log.isInfoEnabled()) {
+                log.info("Socket.IO user connected: {} ({}) - Local connections: {}",
+                        getUserName(client), userId, localConnectionCount());
+            }
 
             client.joinRooms(Set.of("user:" + userId, "socket:" + user.socketId(), "room-list"));
             
@@ -98,10 +100,11 @@ public class ConnectionLoginHandler {
 
             client.leaveRooms(Set.of("user:" + userId, "socket:" + socketId, "room-list"));
             client.del("user");
-            client.disconnect();
 
-            log.info("Socket.IO user disconnected: {} ({}) - Local connections: {}",
-                    userName, userId, localConnectionCount());
+            if (log.isInfoEnabled()) {
+                log.info("Socket.IO user disconnected: {} ({}) - Local connections: {}",
+                        userName, userId, localConnectionCount());
+            }
         } catch (Exception e) {
             log.error("Error handling Socket.IO disconnection", e);
             client.sendEvent(ERROR, Map.of(

@@ -15,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,7 +62,7 @@ class ConnectionLoginHandlerTest {
         verify(connectedUsers).delIfCurrent(user.id(), user);
         verify(client).leaveRooms(Set.of("user:" + user.id(), "socket:" + socketId, "room-list"));
         verify(client).del("user");
-        verify(client).disconnect();
+        verify(client, never()).disconnect();
     }
 
     @Test
@@ -80,6 +81,6 @@ class ConnectionLoginHandlerTest {
         verify(connectedUsers).delIfCurrent(staleUser.id(), staleUser);
         verify(client).leaveRooms(Set.of("user:" + staleUser.id(), "socket:" + staleSocketId, "room-list"));
         verify(client).del("user");
-        verify(client).disconnect();
+        verify(client, never()).disconnect();
     }
 }

@@ -4,6 +4,7 @@ import com.corundumstudio.socketio.SocketIOClient;
 import com.corundumstudio.socketio.SocketIOServer;
 import com.ktb.chatapp.websocket.socketio.ConnectedUsers;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
+import com.ktb.chatapp.websocket.socketio.UserConnectionLocks;
 import com.ktb.chatapp.websocket.socketio.UserRooms;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Set;
@@ -15,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -24,7 +26,6 @@ class ConnectionLoginHandlerTest {
     @Mock private ConnectedUsers connectedUsers;
     @Mock private UserRooms userRooms;
     @Mock private RoomJoinHandler roomJoinHandler;
-    @Mock private RoomLeaveHandler roomLeaveHandler;
     @Mock private SocketIOClient client;
 
     private ConnectionLoginHandler handler;
@@ -35,8 +36,8 @@ class ConnectionLoginHandlerTest {
                 socketIOServer,
                 connectedUsers,
                 userRooms,
+                new UserConnectionLocks(),
                 roomJoinHandler,
-                roomLeaveHandler,
                 new SimpleMeterRegistry());
     }
 
@@ -57,19 +58,38 @@ class ConnectionLoginHandlerTest {
     }
 
     @Test
-    void onDisconnect_removesCurrentConnectionAndLeavesRooms() {
+    void onDisconnect_removesOnlyCurrentConnectionAndPreservesRoomMembership() {
         UUID socketId = UUID.randomUUID();
         SocketUser user = new SocketUser("user-1", "tester", "session-1", socketId.toString());
         when(client.get("user")).thenReturn(user);
-        when(userRooms.get(user.id())).thenReturn(Set.of("room-1"));
         when(client.getSessionId()).thenReturn(socketId);
         when(connectedUsers.get(user.id())).thenReturn(user);
 
         handler.onDisconnect(client);
 
-        verify(roomLeaveHandler).handleLeaveRoom(client, "room-1");
         verify(connectedUsers).del(user.id());
+        verify(userRooms, never()).remove(user.id(), "room-1");
         verify(client).leaveRooms(Set.of("user:" + user.id(), "room-list"));
+        verify(client).del("user");
+        verify(client).disconnect();
+    }
+
+    @Test
+    void onDisconnect_staleSocketDoesNotDeleteActiveConnectionOrRoomMembership() {
+        UUID staleSocketId = UUID.randomUUID();
+        SocketUser staleUser = new SocketUser(
+                "user-1", "tester", "session-1", staleSocketId.toString());
+        SocketUser activeUser = new SocketUser(
+                "user-1", "tester", "session-2", UUID.randomUUID().toString());
+        when(client.get("user")).thenReturn(staleUser);
+        when(client.getSessionId()).thenReturn(staleSocketId);
+        when(connectedUsers.get(staleUser.id())).thenReturn(activeUser);
+
+        handler.onDisconnect(client);
+
+        verify(connectedUsers, never()).del(staleUser.id());
+        verify(userRooms, never()).remove(staleUser.id(), "room-1");
+        verify(client).leaveRooms(Set.of("user:" + staleUser.id(), "room-list"));
         verify(client).del("user");
         verify(client).disconnect();
     }

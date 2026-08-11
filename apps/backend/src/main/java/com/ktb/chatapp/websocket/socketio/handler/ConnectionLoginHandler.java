@@ -5,6 +5,7 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.corundumstudio.socketio.annotation.OnDisconnect;
 import com.ktb.chatapp.websocket.socketio.ConnectedUsers;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
+import com.ktb.chatapp.websocket.socketio.UserConnectionLocks;
 import com.ktb.chatapp.websocket.socketio.UserRooms;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -31,21 +32,21 @@ public class ConnectionLoginHandler {
     private final SocketIOServer socketIOServer;
     private final ConnectedUsers connectedUsers;
     private final UserRooms userRooms;
+    private final UserConnectionLocks userConnectionLocks;
     private final RoomJoinHandler roomJoinHandler;
-    private final RoomLeaveHandler roomLeaveHandler;
 
     public ConnectionLoginHandler(
             SocketIOServer socketIOServer,
             ConnectedUsers connectedUsers,
             UserRooms userRooms,
+            UserConnectionLocks userConnectionLocks,
             RoomJoinHandler roomJoinHandler,
-            RoomLeaveHandler roomLeaveHandler,
             MeterRegistry meterRegistry) {
         this.socketIOServer = socketIOServer;
         this.connectedUsers = connectedUsers;
         this.userRooms = userRooms;
+        this.userConnectionLocks = userConnectionLocks;
         this.roomJoinHandler = roomJoinHandler;
-        this.roomLeaveHandler = roomLeaveHandler;
 
         // Register gauge metric for concurrent users
         Gauge.builder("socketio.concurrent.users", connectedUsers::size)
@@ -60,16 +61,21 @@ public class ConnectionLoginHandler {
         String userId = user.id();
         
         try {
-            // 다른 노드에 접속된 사용자는 통보 불가
-            notifyDuplicateLogin(client, userId);
             client.set("user", user);
-            
-            userRooms.get(userId).forEach(roomId -> {
-                // 재접속 시 기존 참여 방 재입장 처리
-                roomJoinHandler.handleJoinRoom(client, roomId);
+
+            userConnectionLocks.withLock(userId, () -> {
+                // 다른 노드에 접속된 사용자는 통보 불가
+                notifyDuplicateLogin(client, userId);
+
+                // Publish the new owner before restoring rooms. A late disconnect
+                // from the old socket must observe this socket as the active one.
+                connectedUsers.set(userId, user);
+
+                userRooms.get(userId).forEach(roomId -> {
+                    // 재접속 시 기존 참여 방 재입장 처리
+                    roomJoinHandler.handleJoinRoom(client, roomId);
+                });
             });
-            
-            connectedUsers.set(userId, user);
 
             log.info("Socket.IO user connected: {} ({}) - Total concurrent users: {}",
                     getUserName(client), userId, connectedUsers.size());
@@ -94,18 +100,19 @@ public class ConnectionLoginHandler {
                 return;
             }
             
-            userRooms.get(userId).forEach(roomId -> {
-                roomLeaveHandler.handleLeaveRoom(client, roomId);
-            });
             String socketId = client.getSessionId().toString();
-            
-            // 해당 사용자의 현재 활성 연결인 경우에만 정리
-            var socketUser = connectedUsers.get(userId);
-            if (socketUser != null && socketId.equals(socketUser.socketId())) {
-                connectedUsers.del(userId);
-            } else {
-                log.warn("Socket.IO disconnect: User {} has a different active connection. Skipping cleanup.", userId);
-            }
+
+            userConnectionLocks.withLock(userId, () -> {
+                // Disconnect only releases connection ownership. Room membership
+                // is persistent and is removed exclusively by an explicit LEAVE_ROOM.
+                var socketUser = connectedUsers.get(userId);
+                if (socketUser != null && socketId.equals(socketUser.socketId())) {
+                    connectedUsers.del(userId);
+                } else {
+                    log.info("Socket.IO disconnect: User {} has a different active connection. "
+                            + "Skipping connection cleanup.", userId);
+                }
+            });
 
             client.leaveRooms(Set.of("user:" + userId, "room-list"));
             client.del("user");

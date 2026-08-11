@@ -11,8 +11,15 @@ export const useRoomsSocket = ({
   currentUser,
   setConnectionStatus,
   setRooms,
+  currentPage,
+  setMetadata,
 }) => {
   const socketRef = useRef(null);
+  const currentPageRef = useRef(currentPage);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
@@ -48,7 +55,21 @@ export const useRoomsSocket = ({
             setConnectionStatus(CONNECTION_STATUS.ERROR);
           },
           roomCreated: (newRoom) => {
-            setRooms((prev) => [newRoom, ...prev]);
+            setMetadata((prev) => {
+              const total = prev.total + 1;
+              return {
+                ...prev,
+                total,
+                totalPages: Math.ceil(total / prev.pageSize),
+              };
+            });
+
+            if (currentPageRef.current === 0) {
+              setRooms((prev) => [
+                newRoom,
+                ...prev.filter((room) => room._id !== newRoom._id),
+              ].slice(0, 20));
+            }
           },
           roomUpdated: (updatedRoom) => {
             setRooms((prev) =>

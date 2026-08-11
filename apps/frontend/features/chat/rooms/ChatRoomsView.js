@@ -42,12 +42,17 @@ export default function ChatRoomsView({ router }) {
   const {
     rooms,
     setRooms,
+    metadata,
+    setMetadata,
+    currentPage,
     error,
     loading,
     refreshing,
-    joiningRoom,
+    joiningRo선om,
+    pageLoading,
     fetchRooms,
     refreshRooms,
+    changePage,
     handleJoinRoom,
   } = useRoomList({
     currentUser,
@@ -134,7 +139,13 @@ export default function ChatRoomsView({ router }) {
     };
   }, [currentUserKey, connectionStatus]);
 
-  useRoomsSocket({ currentUser, setConnectionStatus, setRooms });
+  useRoomsSocket({
+    currentUser,
+    setConnectionStatus,
+    setRooms,
+    currentPage,
+    setMetadata,
+  });
 
   return (
     <Box
@@ -231,6 +242,10 @@ export default function ChatRoomsView({ router }) {
         ) : rooms.length > 0 ? (
           <RoomsTable
             rooms={rooms}
+            metadata={metadata}
+            currentPage={currentPage}
+            pageLoading={pageLoading}
+            onPageChange={changePage}
             connectionStatus={connectionStatus}
             onJoinRoom={handleJoinRoom}
           />

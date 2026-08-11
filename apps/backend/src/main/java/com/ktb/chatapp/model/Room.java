@@ -14,12 +14,14 @@ import org.springframework.data.mongodb.core.index.IndexDirection;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @Document(collection = "rooms")
+@CompoundIndex(name = "rooms_created_at_id_desc", def = "{'createdAt': -1, '_id': -1}")
 public class Room {
 
     @Id

@@ -11,7 +11,21 @@ vi.mock('@/services/axios', () => ({
   },
 }));
 
-const roomsResponse = (rooms) => ({ data: { data: rooms } });
+const roomsResponse = (rooms, metadata = {}) => ({
+  data: {
+    data: rooms,
+    metadata: {
+      total: rooms.length,
+      page: 0,
+      pageSize: 20,
+      totalPages: rooms.length > 0 ? 1 : 0,
+      hasMore: false,
+      currentCount: rooms.length,
+      sort: { field: 'createdAt', order: 'DESC' },
+      ...metadata,
+    },
+  },
+});
 
 const renderRoomList = () =>
   renderHook(() =>
@@ -45,6 +59,7 @@ describe('useRoomList', () => {
 
     expect(result.current.rooms).toEqual([{ _id: 'room-1' }]);
     expect(result.current.refreshing).toBe(false);
+    expect(axiosInstance.get).toHaveBeenCalledWith('/api/rooms', { params: { page: 0 } });
   });
 
   it('keeps the current list and stays quiet when a silent refresh fails', async () => {
@@ -101,5 +116,86 @@ describe('useRoomList', () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.rooms).toEqual([{ _id: 'room-1' }]);
+  });
+
+  it('loads a selected page and replaces the current rows', async () => {
+    axiosInstance.get.mockResolvedValueOnce(roomsResponse(
+      [{ _id: 'room-1' }],
+      { total: 21, totalPages: 2, hasMore: true },
+    ));
+
+    const { result } = renderRoomList();
+
+    await act(async () => {
+      await result.current.fetchRooms();
+    });
+
+    axiosInstance.get.mockResolvedValueOnce(roomsResponse(
+      [{ _id: 'room-21' }],
+      { total: 21, page: 1, totalPages: 2 },
+    ));
+
+    await act(async () => {
+      await result.current.changePage(1);
+    });
+
+    expect(axiosInstance.get).toHaveBeenLastCalledWith('/api/rooms', { params: { page: 1 } });
+    expect(result.current.currentPage).toBe(1);
+    expect(result.current.rooms).toEqual([{ _id: 'room-21' }]);
+    expect(result.current.pageLoading).toBe(false);
+  });
+
+  it('moves to the last valid page when the current page becomes empty', async () => {
+    axiosInstance.get.mockResolvedValueOnce(roomsResponse(
+      [{ _id: 'room-1' }],
+      { total: 41, totalPages: 3, hasMore: true },
+    ));
+
+    const { result } = renderRoomList();
+
+    await act(async () => {
+      await result.current.fetchRooms();
+    });
+
+    axiosInstance.get
+      .mockResolvedValueOnce(roomsResponse([], { total: 40, page: 2, totalPages: 2 }))
+      .mockResolvedValueOnce(roomsResponse(
+        [{ _id: 'room-40' }],
+        { total: 40, page: 1, totalPages: 2 },
+      ));
+
+    await act(async () => {
+      await result.current.changePage(2);
+    });
+
+    expect(axiosInstance.get).toHaveBeenNthCalledWith(3, '/api/rooms', { params: { page: 1 } });
+    expect(result.current.currentPage).toBe(1);
+    expect(result.current.rooms).toEqual([{ _id: 'room-40' }]);
+  });
+
+  it('returns to page zero when every room has been removed', async () => {
+    axiosInstance.get.mockResolvedValueOnce(roomsResponse(
+      [{ _id: 'room-1' }],
+      { total: 21, totalPages: 2, hasMore: true },
+    ));
+
+    const { result } = renderRoomList();
+
+    await act(async () => {
+      await result.current.fetchRooms();
+    });
+
+    axiosInstance.get.mockResolvedValueOnce(roomsResponse(
+      [],
+      { total: 0, page: 1, totalPages: 0 },
+    ));
+
+    await act(async () => {
+      await result.current.changePage(1);
+    });
+
+    expect(result.current.currentPage).toBe(0);
+    expect(result.current.metadata.page).toBe(0);
+    expect(result.current.rooms).toEqual([]);
   });
 });

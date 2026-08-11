@@ -23,6 +23,9 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
+
 @Component
 @ConditionalOnProperty(name = "file.storage.type", havingValue = "s3")
 public class S3Storage implements StoragePort {
@@ -107,6 +110,55 @@ public class S3Storage implements StoragePort {
                 .url()
                 .toExternalForm())
                 .map(URI::create);
+    }
+
+    @Override
+    public Optional<URI> presignUploadUrl(
+            String key,
+            String contentType,
+            Duration ttl
+    ) {
+        PutObjectRequest putRequest = PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(objectKey(key))
+                .contentType(contentType)
+                .cacheControl(PRIVATE_CACHE_CONTROL)
+                .build();
+
+        return Optional.of(
+                presigner.presignPutObject(
+                        PutObjectPresignRequest.builder()
+                                .signatureDuration(ttl)
+                                .putObjectRequest(putRequest)
+                                .build()
+                ).url().toExternalForm()
+        ).map(URI::create);
+    }
+
+    @Override
+    public Optional<StoredObjectMetadata> stat(String key) {
+        try {
+            HeadObjectResponse response =
+                    s3Client.headObject(
+                            HeadObjectRequest.builder()
+                                    .bucket(bucket)
+                                    .key(objectKey(key))
+                                    .build()
+                    );
+
+            return Optional.of(
+                    new StoredObjectMetadata(
+                            response.contentLength(),
+                            response.contentType()
+                    )
+            );
+
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
     }
 
     private String objectKey(String key) {

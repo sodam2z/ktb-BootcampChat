@@ -1,13 +1,11 @@
 package com.ktb.chatapp.controller;
 
 import com.ktb.chatapp.dto.StandardResponse;
+import com.ktb.chatapp.model.File;
 import com.ktb.chatapp.model.User;
 import com.ktb.chatapp.repository.UserRepository;
-import com.ktb.chatapp.service.FileAccess;
-import com.ktb.chatapp.service.FileAccessService;
-import com.ktb.chatapp.service.FileService;
-import com.ktb.chatapp.service.FileUploadResult;
-import com.ktb.chatapp.service.PreviewNotSupportedException;
+import com.ktb.chatapp.service.*;
+import com.ktb.chatapp.service.ChatFileDirectUploadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -41,6 +39,7 @@ public class FileController {
     private final FileService fileService;
     private final FileAccessService fileAccessService;
     private final UserRepository userRepository;
+    private final ChatFileDirectUploadService chatFileDirectUploadService;
 
     /**
      * 파일 업로드
@@ -97,6 +96,95 @@ public class FileController {
             errorResponse.put("message", "파일 업로드 중 오류가 발생했습니다.");
             errorResponse.put("error", e.getMessage());
             return ResponseEntity.status(500).body(errorResponse);
+        }
+    }
+
+    @PostMapping("/upload/presign")
+    public ResponseEntity<?> createUploadUrl(
+            @RequestBody DirectUploadPresignRequest request,
+            Principal principal
+    ) {
+        try {
+            User user = userRepository
+                    .findByEmail(principal.getName())
+                    .orElseThrow(() ->
+                            new UsernameNotFoundException(
+                                    "User not found: "
+                                            + principal.getName()
+                            )
+                    );
+
+            var prepared =
+                    chatFileDirectUploadService.prepare(
+                            request.originalname(),
+                            request.mimetype(),
+                            request.size(),
+                            user.getId()
+                    );
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("uploadUrl", prepared.uploadUrl());
+            response.put("key", prepared.key());
+            response.put("filename", prepared.filename());
+
+            return ResponseEntity.ok(response);
+
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    )
+            );
+        }
+    }
+
+    @PostMapping("/upload/complete")
+    public ResponseEntity<?> completeUpload(
+            @RequestBody DirectUploadCompleteRequest request,
+            Principal principal
+    ) {
+        try {
+            User user = userRepository
+                    .findByEmail(principal.getName())
+                    .orElseThrow(() ->
+                            new UsernameNotFoundException(
+                                    "User not found: "
+                                            + principal.getName()
+                            )
+                    );
+
+            File savedFile =
+                    chatFileDirectUploadService.complete(
+                            request.key(),
+                            request.originalname(),
+                            request.mimetype(),
+                            request.size(),
+                            user.getId()
+                    );
+
+            Map<String, Object> fileData = new HashMap<>();
+            fileData.put("_id", savedFile.getId());
+            fileData.put("filename", savedFile.getFilename());
+            fileData.put("originalname", savedFile.getOriginalname());
+            fileData.put("mimetype", savedFile.getMimetype());
+            fileData.put("size", savedFile.getSize());
+            fileData.put("uploadDate", savedFile.getUploadDate());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("file", fileData);
+
+            return ResponseEntity.ok(response);
+
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(
+                    Map.of(
+                            "success", false,
+                            "message", e.getMessage()
+                    )
+            );
         }
     }
 
@@ -277,5 +365,19 @@ public class FileController {
             errorResponse.put("error", errorMessage);
             return ResponseEntity.status(500).body(errorResponse);
         }
+    }
+    public record DirectUploadPresignRequest(
+            String originalname,
+            String mimetype,
+            long size
+    ) {
+    }
+
+    public record DirectUploadCompleteRequest(
+            String key,
+            String originalname,
+            String mimetype,
+            long size
+    ) {
     }
 }

@@ -74,81 +74,164 @@ class FileService {
     return { success: true };
   }
 
-  async uploadFile(file, onProgress, token, sessionId) {
-    const validationResult = await this.validateFile(file);
-    if (!validationResult.success) {
-      return validationResult;
+async uploadFile(file, onProgress, token, sessionId) {
+  const validationResult = await this.validateFile(file);
+
+  if (!validationResult.success) {
+    return validationResult;
+  }
+
+  const source = CancelToken.source();
+  this.activeUploads.set(file.name, source);
+
+  const presignUrl = this.baseUrl
+    ? `${this.baseUrl}/api/files/upload/presign`
+    : '/api/files/upload/presign';
+
+  const completeUrl = this.baseUrl
+    ? `${this.baseUrl}/api/files/upload/complete`
+    : '/api/files/upload/complete';
+
+  try {
+    /*
+     * 1. Backend에 presigned PUT URL 요청
+     *
+     * 파일 본문은 보내지 않고
+     * 이름 / 타입 / 크기만 전달한다.
+     */
+    const presignResponse = await axiosInstance.post(
+      presignUrl,
+      {
+        originalname: file.name,
+        mimetype: file.type,
+        size: file.size
+      },
+      {
+        timeout: 10000,
+        cancelToken: source.token,
+        withCredentials: true
+      }
+    );
+
+    const presignData = presignResponse.data;
+
+    if (
+      !presignData?.success ||
+      !presignData?.uploadUrl ||
+      !presignData?.key
+    ) {
+      throw new Error(
+        presignData?.message ||
+        'S3 업로드 주소를 발급받지 못했습니다.'
+      );
     }
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const source = CancelToken.source();
-      this.activeUploads.set(file.name, source);
-
-      const uploadUrl = this.baseUrl ?
-        `${this.baseUrl}/api/files/upload` :
-        '/api/files/upload';
-
-      // token과 sessionId는 axios 인터셉터에서 자동으로 추가되므로
-      // 여기서는 명시적으로 전달하지 않아도 됩니다
-      const response = await axiosInstance.post(uploadUrl, formData, {
+    /*
+     * 2. Browser → S3 직접 업로드
+     *
+     * axiosInstance가 아니라 일반 axios를 사용한다.
+     *
+     * 이유:
+     * S3 요청에는 우리 Backend의
+     * Authorization / session header를 붙이면 안 된다.
+     */
+    await axios.put(
+      presignData.uploadUrl,
+      file,
+      {
         headers: {
-          'Content-Type': 'multipart/form-data'
+          'Content-Type': file.type,
+          'Cache-Control':
+            'private, no-cache, no-store, must-revalidate'
         },
-        // 업로드는 한도가 50MB 라 공통 타임아웃으로는 정상 전송도 끊긴다.
         timeout: 30000,
         cancelToken: source.token,
-        withCredentials: true,
+
         onUploadProgress: (progressEvent) => {
-          if (onProgress) {
+          if (
+            onProgress &&
+            progressEvent.total
+          ) {
             const percentCompleted = Math.round(
-              (progressEvent.loaded * 100) / progressEvent.total
+              (progressEvent.loaded * 100) /
+              progressEvent.total
             );
+
             onProgress(percentCompleted);
           }
         }
-      });
-
-      this.activeUploads.delete(file.name);
-
-      if (!response.data || !response.data.success) {
-        return {
-          success: false,
-          message: response.data?.message || '파일 업로드에 실패했습니다.'
-        };
       }
+    );
 
-      const fileData = response.data.file;
-      return {
-        success: true,
-        data: {
-          ...response.data,
-          file: {
-            ...fileData,
-            url: this.getFileUrl(fileData.filename, true)
-          }
-        }
-      };
-
-    } catch (error) {
-      this.activeUploads.delete(file.name);
-
-      if (isCancel(error)) {
-        return {
-          success: false,
-          message: '업로드가 취소되었습니다.'
-        };
+    /*
+     * 3. S3 업로드 완료 후 Backend에 metadata 저장 요청
+     *
+     * Backend는 S3 HEAD로 실제 객체를 확인하고
+     * MongoDB files 컬렉션에 metadata를 저장한다.
+     */
+    const completeResponse = await axiosInstance.post(
+      completeUrl,
+      {
+        key: presignData.key,
+        originalname: file.name,
+        mimetype: file.type,
+        size: file.size
+      },
+      {
+        timeout: 10000,
+        cancelToken: source.token,
+        withCredentials: true
       }
+    );
 
-      if (error.response?.status === 401) {
-        throw new Error('Authentication expired. Please login again.');
-      }
+    const completeData = completeResponse.data;
 
-      return this.handleUploadError(error);
+    if (
+      !completeData?.success ||
+      !completeData?.file
+    ) {
+      throw new Error(
+        completeData?.message ||
+        '파일 정보를 저장하지 못했습니다.'
+      );
     }
+
+    const fileData = completeData.file;
+
+    return {
+      success: true,
+      data: {
+        ...completeData,
+        file: {
+          ...fileData,
+          url: this.getFileUrl(
+            fileData.filename,
+            true
+          )
+        }
+      }
+    };
+
+  } catch (error) {
+    if (isCancel(error)) {
+      return {
+        success: false,
+        message: '업로드가 취소되었습니다.'
+      };
+    }
+
+    if (error.response?.status === 401) {
+      throw new Error(
+        'Authentication expired. Please login again.'
+      );
+    }
+
+    return this.handleUploadError(error);
+
+  } finally {
+    this.activeUploads.delete(file.name);
   }
+}
   getFileUrl(filename, forPreview = false) {
     if (!filename) return '';
 

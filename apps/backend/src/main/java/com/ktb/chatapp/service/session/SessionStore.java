@@ -24,6 +24,14 @@ public interface SessionStore {
      * @return the saved session
      */
     Session save(Session session);
+
+    /**
+     * Atomically replace or create the session identified by user ID.
+     *
+     * @param session the new active session
+     * @return the stored session
+     */
+    Session replaceByUserId(Session session);
     
     /**
      * Delete all sessions for a user

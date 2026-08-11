@@ -4,6 +4,11 @@ import com.ktb.chatapp.model.Session;
 import com.ktb.chatapp.repository.SessionRepository;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,6 +20,7 @@ import org.springframework.stereotype.Component;
 public class SessionMongoStore implements SessionStore {
     
     private final SessionRepository sessionRepository;
+    private final MongoTemplate mongoTemplate;
     
     @Override
     public Optional<Session> findByUserId(String userId) {
@@ -24,6 +30,25 @@ public class SessionMongoStore implements SessionStore {
     @Override
     public Session save(Session session) {
         return sessionRepository.save(session);
+    }
+
+    @Override
+    public Session replaceByUserId(Session session) {
+        Query query = Query.query(Criteria.where("userId").is(session.getUserId()));
+        Update update = new Update()
+                .set("userId", session.getUserId())
+                .set("sessionId", session.getSessionId())
+                .set("createdAt", session.getCreatedAt())
+                .set("lastActivity", session.getLastActivity())
+                .set("metadata", session.getMetadata())
+                .set("expiresAt", session.getExpiresAt());
+
+        return mongoTemplate.findAndModify(
+                query,
+                update,
+                FindAndModifyOptions.options().upsert(true).returnNew(true),
+                Session.class
+        );
     }
     
     @Override

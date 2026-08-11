@@ -1,6 +1,6 @@
 package com.ktb.chatapp.service;
 
-import com.ktb.chatapp.event.RoomActivityEvent;
+import com.ktb.chatapp.event.RoomActivitiesEvent;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -39,10 +39,9 @@ class RoomActivityNotifierTest {
         notifier.notifyMessageStored("room-1");
         notifier.flushPendingRoomActivities();
 
-        ArgumentCaptor<RoomActivityEvent> event = ArgumentCaptor.forClass(RoomActivityEvent.class);
+        ArgumentCaptor<RoomActivitiesEvent> event = ArgumentCaptor.forClass(RoomActivitiesEvent.class);
         verify(eventPublisher).publishEvent(event.capture());
-        assertThat(event.getValue().getRoomId()).isEqualTo("room-1");
-        assertThat(event.getValue().getRecentMessageCount()).isEqualTo(7);
+        assertThat(event.getValue().getRecentMessageCounts()).containsEntry("room-1", 7);
     }
 
     @Test
@@ -58,7 +57,7 @@ class RoomActivityNotifierTest {
         notifier.flushPendingRoomActivities();
 
         verify(recentMessageCounter).countRecentMessagesByRoomIds(Set.of("room-1"));
-        verify(eventPublisher).publishEvent(any(RoomActivityEvent.class));
+        verify(eventPublisher).publishEvent(any(RoomActivitiesEvent.class));
     }
 
     @Test
@@ -80,11 +79,11 @@ class RoomActivityNotifierTest {
 
         notifier.notifyMessageStored("room-1");
         notifier.flushPendingRoomActivities();
-        verify(eventPublisher, never()).publishEvent(any(RoomActivityEvent.class));
+        verify(eventPublisher, never()).publishEvent(any(RoomActivitiesEvent.class));
 
         notifier.flushPendingRoomActivities();
         verify(recentMessageCounter, times(2)).countRecentMessagesByRoomIds(Set.of("room-1"));
-        verify(eventPublisher).publishEvent(any(RoomActivityEvent.class));
+        verify(eventPublisher).publishEvent(any(RoomActivitiesEvent.class));
     }
 
     @Test

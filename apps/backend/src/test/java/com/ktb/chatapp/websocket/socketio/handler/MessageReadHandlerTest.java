@@ -11,8 +11,8 @@ import com.ktb.chatapp.repository.RoomRepository;
 import com.ktb.chatapp.service.MessageReadStatusService;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import com.ktb.chatapp.websocket.socketio.UserRooms;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,7 +60,7 @@ class MessageReadHandlerTest {
         handler.handleMarkAsRead(client, request);
 
         verify(client).sendEvent(eq(ERROR), any());
-        verify(messageReadStatusService, never()).updateReadStatus(any(), any());
+        verify(messageReadStatusService, never()).updateReadStatus(any(), any(), any());
     }
 
     @Test
@@ -70,15 +70,15 @@ class MessageReadHandlerTest {
 
         when(client.get("user"))
                 .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
-        when(messageRepository.findRoomOnlyById("message-1")).thenReturn(Optional.of(message));
+        when(messageRepository.findRoomsOnlyByIdIn(List.of("message-1"))).thenReturn(List.of(message));
         when(userRooms.isInRoom("user-1", "room-1")).thenReturn(true);
-        when(messageReadStatusService.updateReadStatus(List.of("message-1"), "user-1"))
+        when(messageReadStatusService.updateReadStatus(List.of("message-1"), "user-1", "room-1"))
                 .thenReturn(1L);
         when(socketIOServer.getRoomOperations("room-1")).thenReturn(roomOperations);
 
         handler.handleMarkAsRead(client, request);
 
-        verify(messageReadStatusService).updateReadStatus(List.of("message-1"), "user-1");
+        verify(messageReadStatusService).updateReadStatus(List.of("message-1"), "user-1", "room-1");
         ArgumentCaptor<Object> responseCaptor = ArgumentCaptor.forClass(Object.class);
         verify(roomOperations).sendEvent(eq(MESSAGES_READ), responseCaptor.capture());
         MessagesReadResponse response = (MessagesReadResponse) responseCaptor.getValue();
@@ -86,9 +86,73 @@ class MessageReadHandlerTest {
         assertEquals(List.of("message-1"), response.getMessageIds());
     }
 
-    private MarkAsReadRequest request(String messageId) {
+    @Test
+    void handleMarkAsRead_deduplicatesMessageIdsBeforeUpdate() {
+        MarkAsReadRequest request = request("message-1", "message-1", "", null);
+        Message message = Message.builder().id("message-1").roomId("room-1").build();
+
+        when(client.get("user"))
+                .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
+        when(messageRepository.findRoomsOnlyByIdIn(List.of("message-1"))).thenReturn(List.of(message));
+        when(userRooms.isInRoom("user-1", "room-1")).thenReturn(true);
+        when(messageReadStatusService.updateReadStatus(List.of("message-1"), "user-1", "room-1"))
+                .thenReturn(1L);
+        when(socketIOServer.getRoomOperations("room-1")).thenReturn(roomOperations);
+
+        handler.handleMarkAsRead(client, request);
+
+        verify(messageRepository).findRoomsOnlyByIdIn(List.of("message-1"));
+        verify(messageReadStatusService).updateReadStatus(List.of("message-1"), "user-1", "room-1");
+    }
+
+    @Test
+    void handleMarkAsRead_groupsMixedRoomBatchByRoom() {
+        MarkAsReadRequest request = request("message-1", "message-2");
+        Message roomOneMessage = Message.builder().id("message-1").roomId("room-1").build();
+        Message roomTwoMessage = Message.builder().id("message-2").roomId("room-2").build();
+        BroadcastOperations roomTwoOperations = org.mockito.Mockito.mock(BroadcastOperations.class);
+
+        when(client.get("user"))
+                .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
+        when(messageRepository.findRoomsOnlyByIdIn(List.of("message-1", "message-2")))
+                .thenReturn(List.of(roomOneMessage, roomTwoMessage));
+        when(userRooms.isInRoom("user-1", "room-1")).thenReturn(true);
+        when(userRooms.isInRoom("user-1", "room-2")).thenReturn(true);
+        when(messageReadStatusService.updateReadStatus(List.of("message-1"), "user-1", "room-1"))
+                .thenReturn(1L);
+        when(messageReadStatusService.updateReadStatus(List.of("message-2"), "user-1", "room-2"))
+                .thenReturn(1L);
+        when(socketIOServer.getRoomOperations("room-1")).thenReturn(roomOperations);
+        when(socketIOServer.getRoomOperations("room-2")).thenReturn(roomTwoOperations);
+
+        handler.handleMarkAsRead(client, request);
+
+        verify(messageReadStatusService).updateReadStatus(List.of("message-1"), "user-1", "room-1");
+        verify(messageReadStatusService).updateReadStatus(List.of("message-2"), "user-1", "room-2");
+        verify(roomOperations).sendEvent(eq(MESSAGES_READ), any());
+        verify(roomTwoOperations).sendEvent(eq(MESSAGES_READ), any());
+    }
+
+    @Test
+    void handleMarkAsRead_rejectsWhenUserHasNoRoomAccess() {
+        MarkAsReadRequest request = request("message-1");
+        Message message = Message.builder().id("message-1").roomId("room-1").build();
+
+        when(client.get("user"))
+                .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
+        when(messageRepository.findRoomsOnlyByIdIn(List.of("message-1"))).thenReturn(List.of(message));
+        when(userRooms.isInRoom("user-1", "room-1")).thenReturn(false);
+        when(roomRepository.existsByIdAndParticipantIdsContaining("room-1", "user-1")).thenReturn(false);
+
+        handler.handleMarkAsRead(client, request);
+
+        verify(messageReadStatusService, never()).updateReadStatus(any(), any(), any());
+        verify(client).sendEvent(eq(ERROR), any());
+    }
+
+    private MarkAsReadRequest request(String... messageIds) {
         MarkAsReadRequest request = new MarkAsReadRequest();
-        request.setMessageIds(List.of(messageId));
+        request.setMessageIds(Arrays.asList(messageIds));
         return request;
     }
 }

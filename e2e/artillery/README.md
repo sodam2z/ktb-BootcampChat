@@ -18,6 +18,15 @@
   PHASE1_ARRIVAL_COUNT=10 PHASE1_DURATION=30 make artillery
   ```
 
+  Profile API만 100명 Spike로 측정하려면 회원가입·로그인을 낮은 동시성으로 먼저 준비한 뒤 실행합니다.
+  준비 요청은 Profile latency 측정 구간에서 제외됩니다.
+
+  ```bash
+  API_URL=https://your-backend.example.com \
+  CONCURRENCY=100 SETUP_CONCURRENCY=5 \
+  pnpm --filter e2e run load:profile-api
+  ```
+
 ## 환경 변수
 
   Artillery 실행 시 다음 환경 변수로 커스터마이징할 수 있습니다:

@@ -179,8 +179,8 @@ class SessionServiceTest {
     }
 
     @Test
-    @DisplayName("세션 검증 - lastActivity 업데이트")
-    void validateSession_UpdatesLastActivity() throws InterruptedException {
+    @DisplayName("최근 활동한 세션 검증은 lastActivity를 다시 쓰지 않음")
+    void validateSession_DoesNotUpdateRecentLastActivity() throws InterruptedException {
         // Given
         SessionMetadata metadata = createTestMetadata();
         SessionCreationResult created = sessionService.createSession(TEST_USER_ID, metadata);
@@ -193,7 +193,7 @@ class SessionServiceTest {
 
         // Then
         assertTrue(result.isValid());
-        assertThat(result.getSession().getLastActivity()).isGreaterThan(initialLastActivity);
+        assertThat(result.getSession().getLastActivity()).isEqualTo(initialLastActivity);
     }
 
     // ============ 세션 활동 업데이트 테스트 ============

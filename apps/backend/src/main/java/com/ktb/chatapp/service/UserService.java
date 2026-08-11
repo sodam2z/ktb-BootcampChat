@@ -10,6 +10,11 @@ import com.ktb.chatapp.util.FileUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoOperations;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -26,6 +31,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final FileService fileService;
     private final StoragePort storagePort;
+    private final MongoOperations mongoOperations;
 
     @Value("${app.profile.image.max-size:5242880}") // 5MB
     private long maxProfileImageSize;
@@ -49,15 +55,17 @@ public class UserService {
      * @param email 사용자 이메일
      */
     public UserResponse updateUserProfile(String email, UpdateProfileRequest request) {
-        User user = userRepository.findByEmail(email.toLowerCase())
-                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
-
-        // 프로필 정보 업데이트
-        user.setName(request.getName());
-        user.setUpdatedAt(LocalDateTime.now());
-
-        User updatedUser = userRepository.save(user);
-        log.info("사용자 프로필 업데이트 완료 - ID: {}, Name: {}", user.getId(), request.getName());
+        User updatedUser = mongoOperations.findAndModify(
+                Query.query(Criteria.where("email").is(email.toLowerCase())),
+                new Update()
+                        .set("name", request.getName())
+                        .set("updatedAt", LocalDateTime.now()),
+                FindAndModifyOptions.options().returnNew(true),
+                User.class);
+        if (updatedUser == null) {
+            throw new UsernameNotFoundException("사용자를 찾을 수 없습니다.");
+        }
+        log.debug("사용자 프로필 업데이트 완료 - ID: {}, Name: {}", updatedUser.getId(), request.getName());
 
         return UserResponse.from(updatedUser);
     }
@@ -67,27 +75,39 @@ public class UserService {
      * @param email 사용자 이메일
      */
     public ProfileImageResponse uploadProfileImage(String email, MultipartFile file) {
-        // 사용자 조회
-        User user = userRepository.findByEmail(email.toLowerCase())
-                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
-
         // 파일 유효성 검증
         validateProfileImageFile(file);
 
-        // 기존 프로필 이미지 삭제
-        if (user.getProfileImage() != null && !user.getProfileImage().isEmpty()) {
-            deleteOldProfileImage(user.getProfileImage());
-        }
-
-        // 새 파일 저장 (보안 검증 포함)
+        // 새 파일을 먼저 저장한다. 이후 DB 저장이 실패하면 새 파일을 정리해 기존 프로필을 보존한다.
         String profileImageKey = fileService.storeFile(file, "profiles");
 
-        // DB에는 key만 저장한다 — URL은 응답 경계에서 조립된다
-        user.setProfileImage(profileImageKey);
-        user.setUpdatedAt(LocalDateTime.now());
-        userRepository.save(user);
+        User previousUser;
+        try {
+            previousUser = mongoOperations.findAndModify(
+                    Query.query(Criteria.where("email").is(email.toLowerCase())),
+                    new Update()
+                            .set("profileImage", profileImageKey)
+                            .set("updatedAt", LocalDateTime.now()),
+                    FindAndModifyOptions.options().returnNew(false),
+                    User.class);
+        } catch (RuntimeException e) {
+            deleteProfileImageFile(profileImageKey, "DB 저장 실패 후 새 프로필 이미지 정리");
+            throw e;
+        }
+        if (previousUser == null) {
+            deleteProfileImageFile(profileImageKey, "사용자 없음으로 새 프로필 이미지 정리");
+            throw new UsernameNotFoundException("사용자를 찾을 수 없습니다.");
+        }
 
-        log.info("프로필 이미지 업로드 완료 - User ID: {}, Key: {}", user.getId(), profileImageKey);
+        // 새 key가 DB에 반영된 뒤에만 이전 실물 파일을 삭제한다.
+        String oldProfileImageKey = previousUser.getProfileImage();
+        if (oldProfileImageKey != null
+                && !oldProfileImageKey.isEmpty()
+                && !oldProfileImageKey.equals(profileImageKey)) {
+            deleteProfileImageFile(oldProfileImageKey, "기존 프로필 이미지 삭제");
+        }
+
+        log.debug("프로필 이미지 업로드 완료 - User ID: {}, Key: {}", previousUser.getId(), profileImageKey);
 
         return ProfileImageResponse.updated(profileImageKey);
     }
@@ -138,12 +158,12 @@ public class UserService {
      * 기존 프로필 이미지 실물 삭제. 저장값이 key이므로 스토리지에 그대로 넘긴다 — 삭제 실패가 프로필 갱신
      * 자체를 막지는 않는다.
      */
-    private void deleteOldProfileImage(String profileImageKey) {
+    private void deleteProfileImageFile(String profileImageKey, String operation) {
         try {
             storagePort.delete(profileImageKey);
-            log.info("기존 프로필 이미지 삭제 완료: {}", profileImageKey);
+            log.debug("{} 완료: {}", operation, profileImageKey);
         } catch (RuntimeException e) {
-            log.warn("기존 프로필 이미지 삭제 실패: {}", e.getMessage());
+            log.warn("{} 실패 - Key: {}, Cause: {}", operation, profileImageKey, e.getMessage());
         }
     }
 
@@ -152,16 +172,27 @@ public class UserService {
      * @param email 사용자 이메일
      */
     public void deleteProfileImage(String email) {
-        User user = userRepository.findByEmail(email.toLowerCase())
-                .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
+        Query emailQuery = Query.query(Criteria.where("email").is(email.toLowerCase()));
+        Query imageQuery = Query.query(new Criteria().andOperator(
+                Criteria.where("email").is(email.toLowerCase()),
+                Criteria.where("profileImage").nin(null, "")));
+        User previousUser = mongoOperations.findAndModify(
+                imageQuery,
+                new Update()
+                        .set("profileImage", "")
+                        .set("updatedAt", LocalDateTime.now()),
+                FindAndModifyOptions.options().returnNew(false),
+                User.class);
 
-        if (user.getProfileImage() != null && !user.getProfileImage().isEmpty()) {
-            deleteOldProfileImage(user.getProfileImage());
-            user.setProfileImage("");
-            user.setUpdatedAt(LocalDateTime.now());
-            userRepository.save(user);
-            log.info("프로필 이미지 삭제 완료 - User ID: {}", user.getId());
+        if (previousUser == null) {
+            if (!mongoOperations.exists(emailQuery, User.class)) {
+                throw new UsernameNotFoundException("사용자를 찾을 수 없습니다.");
+            }
+            return;
         }
+
+        deleteProfileImageFile(previousUser.getProfileImage(), "프로필 이미지 삭제");
+        log.debug("프로필 이미지 삭제 완료 - User ID: {}", previousUser.getId());
     }
 
     /**
@@ -173,7 +204,7 @@ public class UserService {
                 .orElseThrow(() -> new UsernameNotFoundException("사용자를 찾을 수 없습니다."));
 
         if (user.getProfileImage() != null && !user.getProfileImage().isEmpty()) {
-            deleteOldProfileImage(user.getProfileImage());
+            deleteProfileImageFile(user.getProfileImage(), "회원 탈퇴 프로필 이미지 삭제");
         }
 
         userRepository.delete(user);

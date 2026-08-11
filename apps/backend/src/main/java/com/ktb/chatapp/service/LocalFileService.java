@@ -42,7 +42,7 @@ public class LocalFileService implements FileService {
             String key = StorageKey.chat(safeFileName);
             storagePort.put(file.getInputStream(), key, file.getContentType(), file.getSize());
 
-            log.info("파일 저장 완료: {}", safeFileName);
+            log.debug("파일 저장 완료: {}", safeFileName);
 
             // 원본 파일명 정규화
             String normalizedOriginalname = FileUtil.normalizeOriginalFilename(originalFilename);
@@ -93,7 +93,7 @@ public class LocalFileService implements FileService {
             // 파일 저장
             storagePort.put(file.getInputStream(), key, file.getContentType(), file.getSize());
 
-            log.info("파일 저장 완료: {}", safeFileName);
+            log.debug("파일 저장 완료: {}", safeFileName);
 
             return key;
 

@@ -19,6 +19,7 @@ public class SessionService {
     private final SessionStore sessionStore;
     public static final long SESSION_TTL_SEC = DurationStyle.detectAndParse(SESSION_TTL).getSeconds();
     private static final long SESSION_TIMEOUT = SESSION_TTL_SEC * 1000;
+    private static final long ACTIVITY_WRITE_INTERVAL_MS = 30_000;
 
     private String generateSessionId() {
         return UUID.randomUUID().toString().replace("-", "");
@@ -91,10 +92,13 @@ public class SessionService {
                 return SessionValidationResult.invalid("SESSION_EXPIRED", "세션이 만료되었습니다.");
             }
 
-            // Update last activity
-            session.setLastActivity(now);
-            session.setExpiresAt(Instant.now().plusSeconds(SESSION_TTL_SEC));
-            session = sessionStore.save(session);
+            // 인증 요청마다 MongoDB write를 발생시키지 않는다. 최근에 갱신된 세션은 읽기만 하고
+            // 일정 시간이 지난 경우에만 lastActivity와 TTL을 연장한다.
+            if (now - session.getLastActivity() >= ACTIVITY_WRITE_INTERVAL_MS) {
+                session.setLastActivity(now);
+                session.setExpiresAt(Instant.now().plusSeconds(SESSION_TTL_SEC));
+                session = sessionStore.save(session);
+            }
 
             SessionData sessionData = toSessionData(session);
             return SessionValidationResult.valid(sessionData);

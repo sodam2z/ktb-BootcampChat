@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -54,6 +55,7 @@ class UploadsResourceAccessTest {
     void profileImageIsServedToAnonymousRequests() throws Exception {
         mockMvc.perform(get("/api/files/profiles/avatar.png"))
                 .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", "max-age=31536000, public, immutable"))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("fake-png-bytes")));
     }
 

@@ -83,35 +83,23 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> registerUser(
             @Valid @RequestBody RegisterRequest registerRequest,
-            BindingResult bindingResult,
-            HttpServletRequest request) {
+            BindingResult bindingResult) {
 
         // Handle validation errors
         ResponseEntity<?> errors = getBindingError(bindingResult);
         if (errors != null) return errors;
         
-        // Check existing user
-        if (userRepository.findByEmail(registerRequest.getEmail()).isPresent()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(StandardResponse.error("이미 등록된 이메일입니다."));
-        }
-
         try {
+            String normalizedEmail = registerRequest.getEmail().toLowerCase(Locale.ROOT);
+
             // Create user
             User user = User.builder()
                     .name(registerRequest.getName())
-                    .email(registerRequest.getEmail().toLowerCase())
+                    .email(normalizedEmail)
                     .password(passwordEncoder.encode(registerRequest.getPassword()))
                     .build();
 
             user = userRepository.save(user);
-
-            // Create session with metadata
-            SessionMetadata metadata = new SessionMetadata(
-                    request.getHeader("User-Agent"),
-                    getClientIpAddress(request),
-                    request.getHeader("User-Agent")
-            );
 
             LoginResponse response = LoginResponse.builder()
                     .success(true)

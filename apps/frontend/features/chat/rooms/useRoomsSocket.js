@@ -43,6 +43,7 @@ export const useRoomsSocket = ({
         if (!isSubscribed || !socket) return;
 
         socketRef.current = socket;
+        setConnectionStatus(CONNECTION_STATUS.CONNECTED);
 
         const handlers = {
           connect: () => {

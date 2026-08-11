@@ -173,7 +173,6 @@ public class ChatMessageHandler {
             // AI 멘션 처리
             aiService.handleAIMentions(roomId, socketUser.id(), messageContent);
 
-            sessionService.updateLastActivity(socketUser.id());
 
             // Record success metrics
             recordMessageSuccess(messageType);

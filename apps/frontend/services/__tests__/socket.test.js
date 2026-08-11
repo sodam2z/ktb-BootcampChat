@@ -79,6 +79,36 @@ describe('socketService', () => {
     expect(socket.on).not.toHaveBeenCalledWith('reconnect_failed', expect.any(Function));
   });
 
+  it('reuses an already connected socket for the same session', async () => {
+    const socket = createSocket({ connected: false });
+    io.mockReturnValue(socket);
+
+    const firstConnection = service.connect({
+      auth: { token: 'token-1', sessionId: 'session-1' },
+    });
+    socket.connected = true;
+    getSocketHandler(socket, 'connect')();
+    await expect(firstConnection).resolves.toBe(socket);
+
+    await expect(service.connect({
+      auth: { token: 'token-1', sessionId: 'session-1' },
+    })).resolves.toBe(socket);
+
+    expect(io).toHaveBeenCalledTimes(1);
+    expect(socket.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('does not force a new Socket.IO manager by default', () => {
+    const socket = createSocket();
+    io.mockReturnValue(socket);
+
+    service.connect({ auth: { token: 'token-1', sessionId: 'session-1' } }).catch(() => {});
+
+    expect(io).toHaveBeenCalledWith('http://localhost:5002', expect.objectContaining({
+      forceNew: false,
+    }));
+  });
+
   it('does not let a stale manager reconnect failure clear a newer socket', async () => {
     const failedSocket = createSocket();
     const liveSocket = createSocket({ connected: true });

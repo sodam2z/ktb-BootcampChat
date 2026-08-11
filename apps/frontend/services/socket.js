@@ -249,12 +249,11 @@ export class SocketService {
 
   handleSocketError(error) {
     if (error.type === 'TransportError') {
-      const reconnectAttempt = this.reconnect();
-      if (reconnectAttempt?.catch) {
-        reconnectAttempt.catch((reconnectError) => {
-          console.log('Socket reconnect failed:', reconnectError.message);
-        });
-      }
+      // The Socket.IO manager already owns the reconnect loop. Starting a second
+      // reconnect here disconnects that manager and creates a new transport,
+      // multiplying connect/disconnect and server-side presence updates.
+      this.connected = false;
+      this.isReconnecting = true;
     }
   }
 

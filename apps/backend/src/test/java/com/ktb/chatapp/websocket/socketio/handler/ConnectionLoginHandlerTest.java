@@ -14,6 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
@@ -40,13 +41,12 @@ class ConnectionLoginHandlerTest {
     void onConnect_setsAndStoresUserWithoutEagerlyLoadingRooms() {
         SocketUser user = new SocketUser("user-1", "tester", "session-1", "socket-1");
         when(connectedUsers.replace(user.id(), user)).thenReturn(null);
-        when(client.get("user")).thenReturn(user);
 
         handler.onConnect(client, user);
 
         verify(client).set("user", user);
         verify(connectedUsers).replace(user.id(), user);
-        verify(client).joinRooms(Set.of("user:" + user.id(), "socket:" + user.socketId(), "room-list"));
+        verify(client).joinRooms(Set.of("user:" + user.id(), "socket:" + user.socketId()));
     }
 
     @Test
@@ -60,7 +60,7 @@ class ConnectionLoginHandlerTest {
         handler.onDisconnect(client);
 
         verify(connectedUsers).delIfCurrent(user.id(), user);
-        verify(client).leaveRooms(Set.of("user:" + user.id(), "socket:" + socketId, "room-list"));
+        verify(client).leaveRooms(Set.of("user:" + user.id(), "socket:" + socketId));
         verify(client).del("user");
         verify(client, never()).disconnect();
     }
@@ -79,7 +79,7 @@ class ConnectionLoginHandlerTest {
         handler.onDisconnect(client);
 
         verify(connectedUsers).delIfCurrent(staleUser.id(), staleUser);
-        verify(client).leaveRooms(Set.of("user:" + staleUser.id(), "socket:" + staleSocketId, "room-list"));
+        verify(client).leaveRooms(Set.of("user:" + staleUser.id(), "socket:" + staleSocketId));
         verify(client).del("user");
         verify(client, never()).disconnect();
     }

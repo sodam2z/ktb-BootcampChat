@@ -110,6 +110,7 @@ export const useRoomsSocket = ({
         const handlers = {
           connect: () => {
             setConnectionStatus(CONNECTION_STATUS.CONNECTED);
+            socket.emit('joinRoomList');
           },
           disconnect: () => {
             setConnectionStatus(CONNECTION_STATUS.DISCONNECTED);
@@ -128,10 +129,12 @@ export const useRoomsSocket = ({
             });
 
             if (currentPageRef.current === 0) {
-              setRooms((prev) => [
-                newRoom,
-                ...prev.filter((room) => room._id !== newRoom._id),
-              ].slice(0, 20));
+              setRooms((prev) =>
+                [
+                  newRoom,
+                  ...prev.filter((room) => room._id !== newRoom._id),
+                ].slice(0, 20)
+              );
             }
           },
           roomUpdated: (updatedRoom) => {
@@ -151,6 +154,7 @@ export const useRoomsSocket = ({
         Object.entries(handlers).forEach(([event, handler]) => {
           socket.on(event, handler);
         });
+        socket.emit('joinRoomList');
       } catch (error) {
         if (!isSubscribed) return;
 
@@ -170,6 +174,9 @@ export const useRoomsSocket = ({
     return () => {
       isSubscribed = false;
       clearRoomActivityQueue();
+      if (subscribedSocket?.connected) {
+        subscribedSocket.emit('leaveRoomList');
+      }
       unsubscribeSocketEvents();
       socketRef.current = null;
     };

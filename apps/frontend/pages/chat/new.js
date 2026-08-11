@@ -11,7 +11,7 @@ import {
   Text,
   TextInput,
   VStack,
-  Callout
+  Callout,
 } from '@vapor-ui/core';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api/client';
@@ -22,7 +22,7 @@ function NewChatRoom() {
   const [formData, setFormData] = useState({
     name: '',
     hasPassword: false,
-    password: ''
+    password: '',
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -50,13 +50,14 @@ function NewChatRoom() {
       setError('');
 
       const response = await api.post('/api/rooms', {
-          name: formData.name.trim(),
-          password: formData.hasPassword ? formData.password : undefined
+        name: formData.name.trim(),
+        password: formData.hasPassword ? formData.password : undefined,
       });
 
       const { data } = response.data;
-      router.push(`/chat/${data._id}`);
-
+      // createRoom already persists the creator in participantIds. Calling the
+      // HTTP join endpoint again adds Mongo reads and a global roomUpdated emit.
+      await router.push(`/chat/${data._id}`);
     } catch (error) {
       console.error('Room creation/join error:', error);
       setError(error.message);
@@ -111,12 +112,16 @@ function NewChatRoom() {
                 size="lg"
                 placeholder="채팅방 이름을 입력하세요"
                 value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, name: e.target.value }))
+                }
                 disabled={loading}
                 data-testid="chat-room-name-input"
               />
             </Box>
-            <Field.Error match="valueMissing">채팅방 이름을 입력해주세요.</Field.Error>
+            <Field.Error match="valueMissing">
+              채팅방 이름을 입력해주세요.
+            </Field.Error>
           </Field.Root>
 
           <Field.Root>
@@ -128,11 +133,13 @@ function NewChatRoom() {
               <Switch.Root
                 id="room-password-toggle"
                 checked={formData.hasPassword}
-                onCheckedChange={(checked) => setFormData(prev => ({
-                  ...prev,
-                  hasPassword: checked,
-                  password: checked ? prev.password : ''
-                }))}
+                onCheckedChange={(checked) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    hasPassword: checked,
+                    password: checked ? prev.password : '',
+                  }))
+                }
                 disabled={loading}
               />
             </HStack>
@@ -150,7 +157,12 @@ function NewChatRoom() {
                   size="lg"
                   placeholder="비밀번호를 입력하세요"
                   value={formData.password}
-                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      password: e.target.value,
+                    }))
+                  }
                   disabled={loading}
                 />
               </Box>
@@ -160,7 +172,11 @@ function NewChatRoom() {
           <Button
             type="submit"
             size="lg"
-            disabled={loading || !formData.name.trim() || (formData.hasPassword && !formData.password)}
+            disabled={
+              loading ||
+              !formData.name.trim() ||
+              (formData.hasPassword && !formData.password)
+            }
             data-testid="create-chat-room-button"
           >
             {loading ? '생성 중...' : '채팅방 만들기'}

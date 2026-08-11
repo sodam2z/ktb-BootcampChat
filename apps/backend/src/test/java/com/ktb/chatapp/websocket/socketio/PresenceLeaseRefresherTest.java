@@ -1,27 +1,31 @@
 package com.ktb.chatapp.websocket.socketio;
 
-import com.corundumstudio.socketio.SocketIOClient;
-import com.corundumstudio.socketio.SocketIOServer;
-import com.corundumstudio.socketio.listener.PongListener;
 import java.time.Duration;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-
-import static org.mockito.Mockito.anyLong;
-import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import com.corundumstudio.socketio.SocketIOClient;
+import com.corundumstudio.socketio.SocketIOServer;
+import com.corundumstudio.socketio.listener.PongListener;
 
 @ExtendWith(MockitoExtension.class)
 class PresenceLeaseRefresherTest {
 
-    @Mock private SocketIOServer socketIOServer;
-    @Mock private ConnectedUsers connectedUsers;
-    @Mock private SocketIOClient client;
+    @Mock
+    private SocketIOServer socketIOServer;
+    @Mock
+    private ConnectedUsers connectedUsers;
+    @Mock
+    private SocketIOClient client;
 
     @Test
     void pongRefreshesOnlyAuthenticatedSocketPresence() {

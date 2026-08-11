@@ -22,7 +22,7 @@ public class PresenceLeaseRefresher {
     public PresenceLeaseRefresher(
             SocketIOServer socketIOServer,
             ConnectedUsers connectedUsers,
-            @Value("${socketio.presence-refresh-interval:1m}") Duration refreshInterval) {
+            @Value("${socketio.presence-refresh-interval:5m}") Duration refreshInterval) {
         this.connectedUsers = connectedUsers;
         this.refreshIntervalMillis = Math.max(0, refreshInterval.toMillis());
         socketIOServer.addPongListener(this::onPong);

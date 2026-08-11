@@ -6,8 +6,6 @@ import com.corundumstudio.socketio.annotation.OnDisconnect;
 import com.ktb.chatapp.websocket.socketio.ConnectedUsers;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import com.ktb.chatapp.websocket.socketio.UserConnectionLocks;
-import com.ktb.chatapp.websocket.socketio.UserRooms;
-import com.ktb.chatapp.repository.RoomRepository;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -32,25 +30,16 @@ public class ConnectionLoginHandler {
 
     private final SocketIOServer socketIOServer;
     private final ConnectedUsers connectedUsers;
-    private final UserRooms userRooms;
     private final UserConnectionLocks userConnectionLocks;
-    private final RoomJoinHandler roomJoinHandler;
-    private final RoomRepository roomRepository;
 
     public ConnectionLoginHandler(
             SocketIOServer socketIOServer,
             ConnectedUsers connectedUsers,
-            UserRooms userRooms,
             UserConnectionLocks userConnectionLocks,
-            RoomJoinHandler roomJoinHandler,
-            RoomRepository roomRepository,
             MeterRegistry meterRegistry) {
         this.socketIOServer = socketIOServer;
         this.connectedUsers = connectedUsers;
-        this.userRooms = userRooms;
         this.userConnectionLocks = userConnectionLocks;
-        this.roomJoinHandler = roomJoinHandler;
-        this.roomRepository = roomRepository;
 
         // Register gauge metric for concurrent users
         Gauge.builder("socketio.concurrent.connections", this::localConnectionCount)
@@ -71,13 +60,6 @@ public class ConnectionLoginHandler {
                 // Atomic replacement works across nodes when RedisChatDataStore is active.
                 SocketUser previousUser = connectedUsers.replace(userId, user);
                 notifyDuplicateLogin(client, previousUser);
-
-                roomRepository.findByParticipantIdsContaining(userId).stream()
-                        .map(com.ktb.chatapp.model.Room::getId).forEach(roomId -> {
-                    userRooms.add(userId, roomId);
-                    // 재접속 시 기존 참여 방 재입장 처리
-                    roomJoinHandler.handleJoinRoom(client, roomId);
-                });
             });
 
             log.info("Socket.IO user connected: {} ({}) - Local connections: {}",

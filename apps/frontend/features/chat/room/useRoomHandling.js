@@ -334,11 +334,24 @@ export const useRoomHandling = ({
       try {
         initializingRef.current = true;
         setupStarted();
-        // 1. Socket Setup
-        attachSocket(await setupSocket());
+        // Socket 연결과 방 상세 조회는 서로 의존하지 않는다.
+        // 순차 실행하면 두 지연이 합산되어 입력창 렌더링이 늦어지므로
+        // 병렬로 시작한다. 두 작업이 모두 정리된 후 결과를 처리해,
+        // 한쪽이 실패해도 이미 연결된 소켓을 catch 블록에서 정리할 수 있게 한다.
+        const [socketResult, roomResult] = await Promise.allSettled([
+          setupSocket(),
+          fetchRoomData(roomId),
+        ]);
 
-        // 2. Fetch Room Data
-        const roomData = await fetchRoomData(roomId);
+        if (socketResult.status === 'rejected') {
+          throw socketResult.reason;
+        }
+        attachSocket(socketResult.value);
+
+        if (roomResult.status === 'rejected') {
+          throw roomResult.reason;
+        }
+        const roomData = roomResult.value;
 
         // Ensure current user is included in participants for display
         if (currentUser && roomData.participants) {

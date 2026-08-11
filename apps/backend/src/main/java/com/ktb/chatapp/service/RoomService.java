@@ -183,12 +183,12 @@ public class RoomService {
             }
         }
 
-        // 이미 참여중인지 확인
-        if (!room.getParticipantIds().contains(user.getId())) {
-            // 채팅방 참여
-            room.getParticipantIds().add(user.getId());
-            room = roomRepository.save(room);
-        }
+        // 전체 Room 문서를 read-modify-save 하면 동시 입장이 서로의
+        // participantIds를 덮어쓸 수 있다. MongoDB $addToSet으로 참여자만
+        // 원자적으로 추가하고, 응답/이벤트에는 갱신된 문서를 사용한다.
+        roomRepository.addParticipant(roomId, user.getId());
+        room = roomRepository.findById(roomId)
+            .orElseThrow(() -> new RuntimeException("채팅방을 찾을 수 없습니다: " + roomId));
         
         // Publish event for room updated
         try {

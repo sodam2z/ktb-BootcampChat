@@ -3,6 +3,40 @@ import { ConfirmOutlineIcon } from '@vapor-ui/icons';
 import { Text, HStack } from '@vapor-ui/core';
 import socketClient from '@/lib/socket/socketClient';
 
+const READ_STATUS_BATCH_DELAY_MS = 300;
+const pendingReadMessageIds = new Set();
+let readStatusBatchTimer = null;
+
+const flushReadStatusBatch = () => {
+  readStatusBatchTimer = null;
+
+  if (!pendingReadMessageIds.size || !socketClient.canSend()) {
+    return;
+  }
+
+  const messageIds = Array.from(pendingReadMessageIds);
+  pendingReadMessageIds.clear();
+
+  try {
+    socketClient.markMessagesAsRead(messageIds);
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+  }
+};
+
+const queueMessageAsRead = (messageId) => {
+  pendingReadMessageIds.add(messageId);
+
+  if (readStatusBatchTimer) {
+    return;
+  }
+
+  readStatusBatchTimer = setTimeout(
+    flushReadStatusBatch,
+    READ_STATUS_BATCH_DELAY_MS
+  );
+};
+
 const ReadStatus = ({ 
   messageType = 'text',
   participants = [],
@@ -37,7 +71,7 @@ const ReadStatus = ({
   }, [unreadParticipants.length, messageType]);
 
   // 메시지를 읽음으로 표시하는 함수
-  const markMessageAsRead = useCallback(async () => {
+  const markMessageAsRead = useCallback(() => {
     if (!messageId || !currentUserId || hasMarkedAsRead || 
         messageType === 'system' || !socketClient.canSend()) {
       return;
@@ -45,7 +79,7 @@ const ReadStatus = ({
 
     try {
       // Socket.IO를 통해 서버에 읽음 상태 전송
-      socketClient.markMessagesAsRead([messageId]);
+      queueMessageAsRead(messageId);
 
       setHasMarkedAsRead(true);
 

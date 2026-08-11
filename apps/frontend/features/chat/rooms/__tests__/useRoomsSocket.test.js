@@ -128,6 +128,8 @@ describe('useRoomsSocket', () => {
 
     act(() => handlers.roomActivity({ _id: 'room-2', recentMessageCount: 9 }));
 
+    await waitFor(() => expect(setRooms).toHaveBeenCalledTimes(1));
+
     const updateRooms = setRooms.mock.calls[0][0];
     expect(updateRooms([
       { _id: 'room-1', name: '방1', recentMessageCount: 1 },
@@ -135,6 +137,31 @@ describe('useRoomsSocket', () => {
     ])).toEqual([
       { _id: 'room-1', name: '방1', recentMessageCount: 1 },
       { _id: 'room-2', name: '방2', recentMessageCount: 9 },
+    ]);
+  });
+
+  it('batches bursty roomActivity updates into one room state update', async () => {
+    const { setRooms } = renderRoomsSocket();
+    await waitFor(() => expect(handlers.roomActivity).toBeTypeOf('function'));
+
+    act(() => {
+      handlers.roomActivity({ _id: 'room-1', recentMessageCount: 2 });
+      handlers.roomActivity({ _id: 'room-2', recentMessageCount: 3 });
+      handlers.roomActivity({ _id: 'room-1', recentMessageCount: 4 });
+    });
+
+    expect(setRooms).not.toHaveBeenCalled();
+    await waitFor(() => expect(setRooms).toHaveBeenCalledTimes(1));
+
+    const updateRooms = setRooms.mock.calls[0][0];
+    expect(updateRooms([
+      { _id: 'room-1', recentMessageCount: 1 },
+      { _id: 'room-2', recentMessageCount: 1 },
+      { _id: 'room-3', recentMessageCount: 1 },
+    ])).toEqual([
+      { _id: 'room-1', recentMessageCount: 4 },
+      { _id: 'room-2', recentMessageCount: 3 },
+      { _id: 'room-3', recentMessageCount: 1 },
     ]);
   });
 

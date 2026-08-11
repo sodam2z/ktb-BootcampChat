@@ -29,6 +29,50 @@ const EmptyMessages = React.memo(() => (
 ));
 EmptyMessages.displayName = 'EmptyMessages';
 
+const getTimestampValue = (message) => {
+  const timestamp = message?.timestamp;
+  if (!timestamp) return 0;
+
+  const value = Date.parse(timestamp);
+  return Number.isNaN(value) ? 0 : value;
+};
+
+export const getChronologicalMessages = (messages) => {
+  if (!Array.isArray(messages)) return [];
+
+  let previousTimestamp = Number.NEGATIVE_INFINITY;
+  const indexedMessages = new Array(messages.length);
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    const timestamp = getTimestampValue(message);
+    indexedMessages[index] = { message, timestamp, index };
+
+    if (timestamp < previousTimestamp) {
+      for (let nextIndex = index + 1; nextIndex < messages.length; nextIndex += 1) {
+        const nextMessage = messages[nextIndex];
+        indexedMessages[nextIndex] = {
+          message: nextMessage,
+          timestamp: getTimestampValue(nextMessage),
+          index: nextIndex,
+        };
+      }
+
+      return indexedMessages
+        .sort((a, b) => (
+          a.timestamp === b.timestamp
+            ? a.index - b.index
+            : a.timestamp - b.timestamp
+        ))
+        .map((item) => item.message);
+    }
+
+    previousTimestamp = timestamp;
+  }
+
+  return messages;
+};
+
 const ChatMessages = ({
   messages = [],
   currentUser = null,
@@ -64,12 +108,7 @@ const ChatMessages = ({
   }, [currentUser?.id]);
 
   const allMessages = useMemo(() => {
-    if (!Array.isArray(messages)) return [];
-
-    return [...messages].sort((a, b) => {
-      if (!a?.timestamp || !b?.timestamp) return 0;
-      return new Date(a.timestamp) - new Date(b.timestamp);
-    });
+    return getChronologicalMessages(messages);
   }, [messages]);
 
   const renderMessage = useCallback((msg, idx) => {

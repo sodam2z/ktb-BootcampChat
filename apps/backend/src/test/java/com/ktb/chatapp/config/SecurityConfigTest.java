@@ -9,10 +9,13 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.cors.CorsConfigurationSource;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +25,9 @@ class SecurityConfigTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private CorsConfigurationSource corsConfigurationSource;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -50,6 +56,16 @@ class SecurityConfigTest {
     void otherApiEndpointsStillRequireAuthentication() throws Exception {
         mockMvc.perform(get("/api/probe"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void corsConfigurationIsReusedAcrossRequests() {
+        MockHttpServletRequest firstRequest = new MockHttpServletRequest("GET", "/api/probe");
+        MockHttpServletRequest secondRequest = new MockHttpServletRequest("GET", "/api/probe");
+
+        assertSame(
+                corsConfigurationSource.getCorsConfiguration(firstRequest),
+                corsConfigurationSource.getCorsConfiguration(secondRequest));
     }
 
     @RestController

@@ -5,7 +5,8 @@
   "scripts": {
     "test": "playwright test --grep @smoke",
     "test:full": "playwright test",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "load:profile-api": "node artillery/profile-api-spike.js"
   },
   "devDependencies": {
     "@playwright/test": "1.61.0",

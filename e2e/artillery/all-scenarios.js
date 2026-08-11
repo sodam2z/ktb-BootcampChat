@@ -66,15 +66,6 @@ async function allScenarios(page, vuContext) {
   }
 }
 
-async function profileScenario(page, vuContext) {
-  const testUser = generateUserSchema();
-  vuContext.vars.testUser = testUser;
-
-  await loginScenario(page, vuContext);
-  await fullProfileUpdateScenario(page, vuContext);
-}
-
 module.exports = {
   allScenarios,
-  profileScenario,
 };

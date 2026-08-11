@@ -32,6 +32,13 @@ public class ConnectedUsers {
     public boolean delIfCurrent(String userId, SocketUser socketUser) {
         return chatDataStore.compareAndDelete(buildKey(userId), socketUser);
     }
+
+    public boolean refreshIfCurrent(SocketUser socketUser) {
+        if (socketUser == null || !socketUser.equals(get(socketUser.id()))) {
+            return false;
+        }
+        return chatDataStore.refresh(buildKey(socketUser.id()));
+    }
     
     public int size() {
         return chatDataStore.size();

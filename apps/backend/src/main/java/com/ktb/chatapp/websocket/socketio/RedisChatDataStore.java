@@ -40,6 +40,11 @@ public class RedisChatDataStore implements ChatDataStore {
     }
 
     @Override
+    public boolean refresh(String key) {
+        return redissonClient.getBucket(key).expire(PRESENCE_TTL);
+    }
+
+    @Override
     public boolean compareAndDelete(String key, Object expectedValue) {
         return redissonClient.getBucket(key).compareAndSet(expectedValue, null);
     }

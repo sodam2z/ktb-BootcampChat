@@ -39,6 +39,10 @@ public interface ChatDataStore {
      */
     void delete(String key);
 
+    default boolean refresh(String key) {
+        return get(key, Object.class).isPresent();
+    }
+
     default boolean compareAndDelete(String key, Object expectedValue) {
         Optional<Object> current = get(key, Object.class);
         if (current.isPresent() && current.get().equals(expectedValue)) {

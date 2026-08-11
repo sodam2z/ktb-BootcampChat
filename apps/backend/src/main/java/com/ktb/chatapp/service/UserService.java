@@ -181,12 +181,13 @@ public class UserService {
         if (size <= 0 || size > maxProfileImageSize) {
             throw new IllegalArgumentException("파일 크기는 5MB를 초과할 수 없습니다.");
         }
-        if (contentType == null || !contentType.startsWith("image/") || originalFilename == null) {
+        if (contentType == null || !contentType.startsWith("image/")) {
             throw new IllegalArgumentException("이미지 파일만 업로드할 수 있습니다.");
         }
-        String extension = FileUtil.getFileExtension(originalFilename).toLowerCase();
-        if (!ALLOWED_EXTENSIONS.contains(extension)) {
-            throw new IllegalArgumentException("이미지 파일만 업로드할 수 있습니다.");
+        try {
+            FileUtil.validateFileMetadata(originalFilename, contentType, size);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
         }
     }
 

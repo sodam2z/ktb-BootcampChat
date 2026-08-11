@@ -3,6 +3,11 @@ node_modules/
 
 **/.next/
 
+# IDE / OS local files
+.idea/
+.vscode/
+.DS_Store
+
 # 환경 변수
 .env
 .env.*

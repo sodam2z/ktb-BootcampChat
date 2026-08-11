@@ -39,7 +39,7 @@ services:
     container_name: grafana-ktb
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "9091:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
@@ -47,7 +47,7 @@ services:
       # Behind the ALB Grafana must know its public name, or its redirects and
       # asset links point at the container. The default is the local port
       # mapping in this file, not the 9091 the dev compose uses.
-      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:9091}
       - GF_ANALYTICS_REPORTING_ENABLED=false
     volumes:
       - grafana_data:/var/lib/grafana

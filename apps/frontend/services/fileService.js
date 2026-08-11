@@ -85,8 +85,8 @@ async uploadFile(file, onProgress, token, sessionId) {
   this.activeUploads.set(file.name, source);
 
   const presignUrl = this.baseUrl
-    ? `${this.baseUrl}/api/files/upload/presign`
-    : '/api/files/upload/presign';
+    ? `${this.baseUrl}/api/files/presign`
+    : '/api/files/presign';
 
   const completeUrl = this.baseUrl
     ? `${this.baseUrl}/api/files/upload/complete`
@@ -140,9 +140,7 @@ async uploadFile(file, onProgress, token, sessionId) {
       file,
       {
         headers: {
-          'Content-Type': file.type,
-          'Cache-Control':
-            'private, no-cache, no-store, must-revalidate'
+          'Content-Type': file.type
         },
         timeout: 30000,
         cancelToken: source.token,

@@ -194,7 +194,7 @@ public class FileController {
      *
      * 파일 본문은 Backend로 들어오지 않는다.
      */
-    @PostMapping("/upload/presign")
+    @PostMapping({"/presign", "/upload/presign"})
     public ResponseEntity<?> createUploadUrl(
             @RequestBody
             DirectUploadPresignRequest request,

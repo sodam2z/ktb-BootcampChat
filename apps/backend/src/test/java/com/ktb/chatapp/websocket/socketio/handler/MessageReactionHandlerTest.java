@@ -6,7 +6,7 @@ import com.corundumstudio.socketio.SocketIOServer;
 import com.ktb.chatapp.dto.MessageReactionRequest;
 import com.ktb.chatapp.dto.MessageReactionResponse;
 import com.ktb.chatapp.model.Message;
-import com.ktb.chatapp.repository.MessageRepository;
+import com.ktb.chatapp.service.MessageReactionService;
 import com.ktb.chatapp.websocket.socketio.SocketUser;
 import java.util.Optional;
 import java.util.Set;
@@ -30,7 +30,7 @@ import static org.mockito.Mockito.when;
 class MessageReactionHandlerTest {
 
     @Mock private SocketIOServer socketIOServer;
-    @Mock private MessageRepository messageRepository;
+    @Mock private MessageReactionService messageReactionService;
     @Mock private SocketIOClient client;
     @Mock private BroadcastOperations roomOperations;
 
@@ -38,7 +38,7 @@ class MessageReactionHandlerTest {
 
     @BeforeEach
     void setUp() {
-        handler = new MessageReactionHandler(socketIOServer, messageRepository);
+        handler = new MessageReactionHandler(socketIOServer, messageReactionService);
     }
 
     @Test
@@ -48,7 +48,7 @@ class MessageReactionHandlerTest {
         handler.handleMessageReaction(client, new MessageReactionRequest("👍", "message-1", "add", "👍"));
 
         verify(client).sendEvent(eq(ERROR), any());
-        verify(messageRepository, never()).save(any());
+        verify(messageReactionService, never()).update(any(), any(), any(), eq(true));
     }
 
     @Test
@@ -59,13 +59,14 @@ class MessageReactionHandlerTest {
 
         when(client.get("user"))
                 .thenReturn(new SocketUser("user-1", "tester", "session-1", "socket-1"));
-        when(messageRepository.findById("message-1")).thenReturn(Optional.of(message));
-        when(messageRepository.save(message)).thenReturn(message);
+        message.addReaction("👍", "user-1");
+        when(messageReactionService.update("message-1", "👍", "user-1", true))
+                .thenReturn(Optional.of(message));
         when(socketIOServer.getRoomOperations("room-1")).thenReturn(roomOperations);
 
         handler.handleMessageReaction(client, request);
 
-        verify(messageRepository).save(message);
+        verify(messageReactionService).update("message-1", "👍", "user-1", true);
         ArgumentCaptor<Object> responseCaptor = ArgumentCaptor.forClass(Object.class);
         verify(roomOperations).sendEvent(eq(MESSAGE_REACTION_UPDATE), responseCaptor.capture());
         MessageReactionResponse response = (MessageReactionResponse) responseCaptor.getValue();

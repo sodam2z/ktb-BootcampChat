@@ -11,6 +11,7 @@ import com.ktb.chatapp.repository.MessageRepository;
 import com.ktb.chatapp.websocket.socketio.handler.StreamingSession;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -50,9 +51,9 @@ public class AiService {
 
     private void startStreaming(String roomId, String userId, String aiType, String query) {
         
-        // AI 스트리밍 세션 생성 - messageId는 타입과 타임스탬프 조합
+        // 인스턴스와 시계에 독립적인 전역 식별자를 사용한다.
         var timestamp = System.currentTimeMillis();
-        String messageId = aiType + "-" + timestamp;
+        String messageId = UUID.randomUUID().toString();
 
         log.info("AI response started - messageId: {}, room: {}, aiType: {}, query: {}",
             messageId, roomId, aiType, query);
@@ -123,6 +124,7 @@ public class AiService {
     
     private Message getMessage(AiMessageCompleteEvent event) {
         Message aiMessage = new Message();
+        aiMessage.setId(event.getMessageId());
         aiMessage.setRoomId(event.getRoomId());
         aiMessage.setContent(event.getContent());
         aiMessage.setType(MessageType.ai);

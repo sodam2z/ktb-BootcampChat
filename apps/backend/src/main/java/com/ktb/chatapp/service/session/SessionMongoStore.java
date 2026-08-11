@@ -50,13 +50,19 @@ public class SessionMongoStore implements SessionStore {
                 Session.class
         );
     }
+
+    @Override
+    public Optional<Session> touch(String userId, String sessionId, long lastActivity, java.time.Instant expiresAt) {
+        Query query = Query.query(Criteria.where("userId").is(userId).and("sessionId").is(sessionId));
+        Update update = new Update().set("lastActivity", lastActivity).set("expiresAt", expiresAt);
+        return Optional.ofNullable(mongoTemplate.findAndModify(query, update,
+                FindAndModifyOptions.options().returnNew(true), Session.class));
+    }
     
     @Override
     public void delete(String userId, String sessionId) {
-        Session session = sessionRepository.findByUserId(userId).orElse(null);
-        if (session != null && sessionId.equals(session.getSessionId())) {
-            sessionRepository.delete(session);
-        }
+        Query query = Query.query(Criteria.where("userId").is(userId).and("sessionId").is(sessionId));
+        mongoTemplate.remove(query, Session.class);
     }
     
     @Override

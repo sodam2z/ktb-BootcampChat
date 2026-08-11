@@ -4,6 +4,9 @@ import com.ktb.chatapp.config.MongoTestContainer;
 import com.ktb.chatapp.repository.RateLimitRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -130,5 +133,26 @@ class RateLimitServiceTest {
                 rateLimitService.checkRateLimit(clientId2, maxRequests, window);
         assertThat(result2.allowed()).isTrue();
         assertThat(result2.remaining()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("동시 요청도 인스턴스 공통 한도를 초과해 허용하지 않는다")
+    void checkRateLimit_ConcurrentRequestsRespectGlobalLimit() throws Exception {
+        int maxRequests = 5;
+        var executor = Executors.newFixedThreadPool(10);
+        try {
+            var futures = IntStream.range(0, 20)
+                    .mapToObj(ignored -> executor.submit(() -> rateLimitService.checkRateLimit(
+                            "concurrent-client", maxRequests, Duration.ofSeconds(60))))
+                    .toList();
+
+            long allowed = 0;
+            for (var future : futures) {
+                if (future.get(10, TimeUnit.SECONDS).allowed()) allowed++;
+            }
+            assertThat(allowed).isEqualTo(maxRequests);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 }

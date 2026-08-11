@@ -54,11 +54,6 @@ public class RoomLeaveHandler {
                 return;
             }
 
-            if (!userRooms.isInRoom(userId, roomId)) {
-                log.debug("User {} is not in room {}", userId, roomId);
-                return;
-            }
-
             User user = userRepository.findById(userId).orElse(null);
             Room room = roomRepository.findById(roomId).orElse(null);
             
@@ -67,7 +62,10 @@ public class RoomLeaveHandler {
                 return;
             }
             
-            roomRepository.removeParticipant(roomId, userId);
+            if (roomRepository.removeParticipant(roomId, userId) == 0) {
+                log.debug("User {} is not in room {}", userId, roomId);
+                return;
+            }
             
             client.leaveRoom(roomId);
             userRooms.remove(userId, roomId);

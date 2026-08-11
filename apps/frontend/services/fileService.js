@@ -1,6 +1,15 @@
 import axios, { isCancel, CancelToken } from 'axios';
 import axiosInstance from './axios';
 import { Toast } from '../components/Toast';
+import { optimizeImageFile } from '../lib/images/optimizeImageFile';
+
+const CHAT_IMAGE_RESIZE_ENABLED =
+  process.env.NEXT_PUBLIC_CHAT_IMAGE_RESIZE_ENABLED === 'true';
+
+const CHAT_IMAGE_RESIZE_OPTIONS = {
+  maxDimension: 1600,
+  quality: 0.84,
+};
 
 class FileService {
   constructor() {
@@ -74,8 +83,17 @@ class FileService {
     return { success: true };
   }
 
+  async prepareUploadFile(file) {
+    if (!CHAT_IMAGE_RESIZE_ENABLED || !file?.type?.startsWith('image/')) {
+      return file;
+    }
+
+    return optimizeImageFile(file, CHAT_IMAGE_RESIZE_OPTIONS);
+  }
+
 async uploadFile(file, onProgress, token, sessionId) {
-  const validationResult = await this.validateFile(file);
+  const uploadFile = await this.prepareUploadFile(file);
+  const validationResult = await this.validateFile(uploadFile);
 
   if (!validationResult.success) {
     return validationResult;
@@ -102,9 +120,9 @@ async uploadFile(file, onProgress, token, sessionId) {
     const presignResponse = await axiosInstance.post(
       presignUrl,
       {
-        originalname: file.name,
-        mimetype: file.type,
-        size: file.size
+        originalname: uploadFile.name,
+        mimetype: uploadFile.type,
+        size: uploadFile.size
       },
       {
         timeout: 10000,
@@ -137,10 +155,12 @@ async uploadFile(file, onProgress, token, sessionId) {
      */
     await axios.put(
       presignData.uploadUrl,
-      file,
+      uploadFile,
       {
         headers: {
-          'Content-Type': file.type
+          'Content-Type': uploadFile.type,
+          'Cache-Control':
+            'private, no-cache, no-store, must-revalidate'
         },
         timeout: 30000,
         cancelToken: source.token,
@@ -171,9 +191,9 @@ async uploadFile(file, onProgress, token, sessionId) {
       completeUrl,
       {
         key: presignData.key,
-        originalname: file.name,
-        mimetype: file.type,
-        size: file.size
+        originalname: uploadFile.name,
+        mimetype: uploadFile.type,
+        size: uploadFile.size
       },
       {
         timeout: 10000,

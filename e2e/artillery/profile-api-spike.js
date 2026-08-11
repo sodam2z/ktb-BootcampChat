@@ -7,6 +7,8 @@ const CONCURRENCY = Number(process.env.CONCURRENCY || 100);
 const SETUP_CONCURRENCY = Number(process.env.SETUP_CONCURRENCY || 5);
 const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS || 10000);
 const IMAGE_PATH = process.env.PROFILE_IMAGE || path.resolve(__dirname, '../fixtures/images/profile.jpg');
+const IMAGE_CONTENT_TYPE = process.env.PROFILE_IMAGE_CONTENT_TYPE
+  || (path.extname(IMAGE_PATH).toLowerCase() === '.webp' ? 'image/webp' : 'image/jpeg');
 const samples = new Map();
 
 function record(name, ms, status, error = null) {
@@ -83,7 +85,7 @@ async function profileFlow(user, imageBytes) {
   await measured('profile.get', '/api/users/profile', { headers: authHeaders });
 
   const form = new FormData();
-  form.append('profileImage', new Blob([imageBytes], { type: 'image/jpeg' }), 'profile.jpg');
+  form.append('profileImage', new Blob([imageBytes], { type: IMAGE_CONTENT_TYPE }), path.basename(IMAGE_PATH));
   const upload = await measured('profile.upload', '/api/users/profile-image', {
     method: 'POST',
     headers: authHeaders,

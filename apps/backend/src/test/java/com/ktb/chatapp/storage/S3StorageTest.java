@@ -21,6 +21,8 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedGetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 @DisplayName("S3Storage 단위 테스트")
 class S3StorageTest {
@@ -68,5 +70,20 @@ class S3StorageTest {
                 .orElseThrow();
 
         assertThat(result).isEqualTo(URI.create("https://example.test/signed-profile"));
+    }
+
+    @Test
+    void directUploadSignsOnlyRequiredContentTypeHeader() throws Exception {
+        PresignedPutObjectRequest signed = mock(PresignedPutObjectRequest.class);
+        when(signed.url()).thenReturn(new URL("https://example.test/signed-upload"));
+        when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(signed);
+
+        storage.presignUploadUrl("chat/user-1/file.jpg", "image/jpeg", Duration.ofMinutes(10));
+
+        ArgumentCaptor<PutObjectPresignRequest> request =
+                ArgumentCaptor.forClass(PutObjectPresignRequest.class);
+        verify(presigner).presignPutObject(request.capture());
+        assertThat(request.getValue().putObjectRequest().contentType()).isEqualTo("image/jpeg");
+        assertThat(request.getValue().putObjectRequest().cacheControl()).isNull();
     }
 }

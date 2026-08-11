@@ -1,9 +1,11 @@
 package com.ktb.chatapp.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
@@ -14,6 +16,7 @@ import com.ktb.chatapp.repository.UserRepository;
 import com.ktb.chatapp.security.SessionAwareJwtAuthenticationConverter;
 import com.ktb.chatapp.service.FileAccess;
 import com.ktb.chatapp.service.FileAccessService;
+import com.ktb.chatapp.service.ChatFileDirectUploadService;
 import com.ktb.chatapp.service.FileService;
 import com.ktb.chatapp.service.PreviewNotSupportedException;
 import com.ktb.chatapp.service.RateLimitService;
@@ -62,6 +65,9 @@ class FileControllerTest {
 
     @MockitoBean
     private FileAccessService fileAccessService;
+
+    @MockitoBean
+    private ChatFileDirectUploadService chatFileDirectUploadService;
 
     @MockitoBean
     private UserRepository userRepository;
@@ -189,6 +195,32 @@ class FileControllerTest {
         mockMvc.perform(delete("/api/files/{id}", "file-1").principal(PRINCIPAL))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("파일을 삭제할 권한이 없습니다."));
+    }
+
+    @Test
+    @DisplayName("presign 신규·호환 경로가 같은 응답을 반환한다")
+    void presignAliases_returnSameUploadContract() throws Exception {
+        when(chatFileDirectUploadService.prepare(
+                eq("profile.jpg"), eq("image/jpeg"), eq(1024L), eq(USER_ID)))
+                .thenReturn(new ChatFileDirectUploadService.PreparedUpload(
+                        "https://s3.example.test/signed-upload",
+                        "chat/user-1/safe.jpg",
+                        "safe.jpg"));
+
+        String requestBody = """
+                {"originalname":"profile.jpg","mimetype":"image/jpeg","size":1024}
+                """;
+
+        for (String path : new String[]{"/api/files/presign", "/api/files/upload/presign"}) {
+            mockMvc.perform(post(path)
+                            .principal(PRINCIPAL)
+                            .contentType("application/json")
+                            .content(requestBody))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.success").value(true))
+                    .andExpect(jsonPath("$.uploadUrl").value("https://s3.example.test/signed-upload"))
+                    .andExpect(jsonPath("$.key").value("chat/user-1/safe.jpg"));
+        }
     }
 
     private FileAccess stream() {

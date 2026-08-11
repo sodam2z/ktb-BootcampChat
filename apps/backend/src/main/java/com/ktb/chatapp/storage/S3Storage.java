@@ -122,7 +122,6 @@ public class S3Storage implements StoragePort {
                 .bucket(bucket)
                 .key(objectKey(key))
                 .contentType(contentType)
-                .cacheControl(PRIVATE_CACHE_CONTROL)
                 .build();
 
         return Optional.of(

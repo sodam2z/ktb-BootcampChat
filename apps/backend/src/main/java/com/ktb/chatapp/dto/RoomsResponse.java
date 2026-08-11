@@ -12,6 +12,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class RoomsResponse {
+    @Builder.Default
     private boolean success = true;
     private List<RoomListItemResponse> data;
     private PageMetadata metadata;

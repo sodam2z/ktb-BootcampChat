@@ -47,6 +47,7 @@ public class User {
 
     private LocalDateTime lastLogin;
 
+    @Builder.Default
     private boolean isOnline = false;
     
     /**

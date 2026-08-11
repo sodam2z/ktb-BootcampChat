@@ -6,7 +6,7 @@ import {
   PlayIcon as Music,
   ErrorCircleIcon as AlertCircle
 } from '@vapor-ui/icons';
-import { Button, VStack, HStack } from '@vapor-ui/core';
+import { VStack, HStack } from '@vapor-ui/core';
 import CustomAvatar from './CustomAvatar';
 import MessageContent from './MessageContent';
 import MessageActions from './MessageActions';
@@ -27,16 +27,32 @@ const FileMessage = ({
   const [error, setError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const messageDomRef = useRef(null);
+
   useEffect(() => {
-    if (msg?.file) {
-      const url = fileService.getPreviewUrl(msg.file, user?.token, user?.sessionId, true);
-      setPreviewUrl(url);
-      console.debug('Preview URL generated:', {
-        filename: msg.file.filename,
-        url
-      });
+    if (msg?.file?.deleted) {
+      setPreviewUrl('');
+      setError(null);
+      return;
     }
-  }, [msg?.file, user?.token, user?.sessionId]);
+
+    if (!msg?.file) {
+      setPreviewUrl('');
+      return;
+    }
+
+    const url = fileService.getPreviewUrl(
+      msg.file,
+      user?.token,
+      user?.sessionId,
+      true
+    );
+
+    setPreviewUrl(url);
+  }, [
+    msg?.file,
+    user?.token,
+    user?.sessionId
+  ]);
 
   if (!msg?.file) {
     console.error('File data is missing:', msg);
@@ -51,11 +67,11 @@ const FileMessage = ({
     minute: '2-digit',
     second: '2-digit',
     hour12: false
-  }).replace(/\./g, '년').replace(/\s/g, ' ').replace('일 ', '일 ');
+  });
 
   const getFileIcon = () => {
     const mimetype = msg.file?.mimetype || '';
-    const iconProps = { className: "w-5 h-5 flex-shrink-0" };
+    const iconProps = { className: 'w-5 h-5 flex-shrink-0' };
 
     if (mimetype.startsWith('image/')) return <Image {...iconProps} color="#00C853" />;
     if (mimetype.startsWith('video/')) return <Film {...iconProps} color="#2196F3" />;
@@ -66,21 +82,22 @@ const FileMessage = ({
   const getDecodedFilename = (encodedFilename) => {
     try {
       if (!encodedFilename) return 'Unknown File';
-      
+
       const base64 = encodedFilename
         .replace(/-/g, '+')
         .replace(/_/g, '/');
-      
+
       const pad = base64.length % 4;
       const paddedBase64 = pad ? base64 + '='.repeat(4 - pad) : base64;
-      
+
       if (paddedBase64.match(/^[A-Za-z0-9+/=]+$/)) {
-        return Buffer.from(paddedBase64, 'base64').toString('utf8');
+        const bytes = Uint8Array.from(atob(paddedBase64), (char) => char.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
       }
 
       return decodeURIComponent(encodedFilename);
-    } catch (error) {
-      console.error('Filename decoding error:', error);
+    } catch (decodeError) {
+      console.error('Filename decoding error:', decodeError);
       return encodedFilename;
     }
   };
@@ -95,35 +112,40 @@ const FileMessage = ({
     />
   );
 
+  const requireFileAuth = () => {
+    if (!msg.file?.filename) {
+      throw new Error('File information is missing.');
+    }
+
+    if (!user?.token || !user?.sessionId) {
+      throw new Error('Authentication information is missing.');
+    }
+  };
+
   const handleFileDownload = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setError(null);
 
     try {
-      if (!msg.file?.filename) {
-        throw new Error('파일 정보가 없습니다.');
-      }
-
-      if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
-      }
+      requireFileAuth();
 
       const baseUrl = fileService.getFileUrl(msg.file.filename, false);
-      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user?.token)}&sessionId=${encodeURIComponent(user?.sessionId)}&download=true`;
-      
+      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}&download=true`;
+
       const iframe = document.createElement('iframe');
       iframe.style.display = 'none';
       iframe.src = authenticatedUrl;
       document.body.appendChild(iframe);
 
       setTimeout(() => {
-        document.body.removeChild(iframe);
+        if (iframe.parentNode) {
+          iframe.parentNode.removeChild(iframe);
+        }
       }, 5000);
-
-    } catch (error) {
-      console.error('File download error:', error);
-      setError(error.message || '파일 다운로드 중 오류가 발생했습니다.');
+    } catch (downloadError) {
+      console.error('File download error:', downloadError);
+      setError(downloadError.message || 'An error occurred while downloading the file.');
     }
   };
 
@@ -133,25 +155,19 @@ const FileMessage = ({
     setError(null);
 
     try {
-      if (!msg.file?.filename) {
-        throw new Error('파일 정보가 없습니다.');
-      }
-
-      if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
-      }
+      requireFileAuth();
 
       const baseUrl = fileService.getFileUrl(msg.file.filename, true);
-      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user?.token)}&sessionId=${encodeURIComponent(user?.sessionId)}`;
+      const authenticatedUrl = `${baseUrl}?token=${encodeURIComponent(user.token)}&sessionId=${encodeURIComponent(user.sessionId)}`;
 
       const newWindow = window.open(authenticatedUrl, '_blank');
       if (!newWindow) {
-        throw new Error('팝업이 차단되었습니다. 팝업 차단을 해제해주세요.');
+        throw new Error('Popup was blocked. Please allow popups and try again.');
       }
       newWindow.opener = null;
-    } catch (error) {
-      console.error('File view error:', error);
-      setError(error.message || '파일 보기 중 오류가 발생했습니다.');
+    } catch (viewError) {
+      console.error('File view error:', viewError);
+      setError(viewError.message || 'An error occurred while opening the file.');
     }
   };
 
@@ -166,10 +182,8 @@ const FileMessage = ({
       }
 
       if (!user?.token || !user?.sessionId) {
-        throw new Error('인증 정보가 없습니다.');
+        throw new Error('Authentication information is missing.');
       }
-
-      const previewUrl = fileService.getPreviewUrl(msg.file, user?.token, user?.sessionId, true);
 
       return (
         <div className="bg-transparent-pattern">
@@ -177,26 +191,20 @@ const FileMessage = ({
             src={previewUrl}
             alt={originalname}
             className="max-w-[400px] max-h-[400px] object-cover object-center rounded-md"
-            onLoad={() => {
-              console.debug('Image loaded successfully:', originalname);
-            }}
             onError={(e) => {
-              console.error('Image load error:', {
-                error: e.error,
-                originalname
-              });
+              console.error('Image load error:', { originalname });
               e.target.onerror = null;
               e.target.src = '/images/placeholder-image.png';
-              setError('이미지를 불러올 수 없습니다.');
+              setError('Failed to load image preview.');
             }}
             loading="lazy"
             data-testid="file-image-preview"
           />
         </div>
       );
-    } catch (error) {
-      console.error('Image preview error:', error);
-      setError(error.message || '이미지 미리보기를 불러올 수 없습니다.');
+    } catch (previewError) {
+      console.error('Image preview error:', previewError);
+      setError(previewError.message || 'Failed to load image preview.');
       return (
         <div className="flex items-center justify-center h-full bg-gray-100">
           <Image className="w-8 h-8 text-gray-400" />
@@ -205,24 +213,36 @@ const FileMessage = ({
     }
   };
 
+  const renderFileMetadata = (originalname, size) => (
+    <div className="flex items-center gap-2 mt-2">
+      {getFileIcon()}
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium truncate text-gray-200">{originalname}</div>
+        <div className="text-xs text-gray-400">{size}</div>
+      </div>
+    </div>
+  );
+
   const renderFilePreview = () => {
     const mimetype = msg.file?.mimetype || '';
     const originalname = getDecodedFilename(msg.file?.originalname || 'Unknown File');
     const size = fileService.formatFileSize(msg.file?.size || 0);
+    const previewWrapperClass = 'overflow-hidden';
 
-    const previewWrapperClass = "overflow-hidden";
+    if (msg.file?.deleted) {
+      return (
+        <div className="flex items-center gap-2 text-gray-400">
+          <AlertCircle className="w-5 h-5" />
+          <span className="text-sm">Deleted file.</span>
+        </div>
+      );
+    }
 
     if (mimetype.startsWith('image/')) {
       return (
         <div className={previewWrapperClass}>
           {renderImagePreview(originalname)}
-          <div className="flex items-center gap-2 mt-2">
-            {getFileIcon()}
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate text-gray-200">{originalname}</div>
-              <div className="text-xs text-gray-400">{size}</div>
-            </div>
-          </div>
+          {renderFileMetadata(originalname, size)}
           <FileActions onViewInNewTab={handleViewInNewTab} onDownload={handleFileDownload} />
         </div>
       );
@@ -237,12 +257,12 @@ const FileMessage = ({
                 className="max-w-[400px] max-h-[400px] object-cover rounded-md"
                 controls
                 preload="metadata"
-                aria-label={`${originalname} 비디오`}
+                aria-label={`${originalname} video`}
                 crossOrigin="use-credentials"
               >
                 <source src={previewUrl} type={mimetype} />
                 <track kind="captions" />
-                비디오를 재생할 수 없습니다.
+                Video playback is not supported.
               </video>
             ) : (
               <div className="flex items-center justify-center h-full">
@@ -250,13 +270,7 @@ const FileMessage = ({
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-2">
-            {getFileIcon()}
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate text-gray-200">{originalname}</div>
-              <div className="text-xs text-gray-400">{size}</div>
-            </div>
-          </div>
+          {renderFileMetadata(originalname, size)}
           <FileActions onViewInNewTab={handleViewInNewTab} onDownload={handleFileDownload} />
         </div>
       );
@@ -265,24 +279,18 @@ const FileMessage = ({
     if (mimetype.startsWith('audio/')) {
       return (
         <div className={previewWrapperClass}>
-          <div className="flex items-center gap-2 mt-2">
-            {getFileIcon()}
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium truncate text-gray-200">{originalname}</div>
-              <div className="text-xs text-gray-400">{size}</div>
-            </div>
-          </div>
+          {renderFileMetadata(originalname, size)}
           <div className="mt-3">
             {previewUrl && (
               <audio
                 className="w-full"
                 controls
                 preload="metadata"
-                aria-label={`${originalname} 오디오`}
+                aria-label={`${originalname} audio`}
                 crossOrigin="use-credentials"
               >
                 <source src={previewUrl} type={mimetype} />
-                오디오를 재생할 수 없습니다.
+                Audio playback is not supported.
               </audio>
             )}
           </div>
@@ -293,13 +301,7 @@ const FileMessage = ({
 
     return (
       <div className={previewWrapperClass}>
-        <div className="flex items-center gap-2 mt-2">
-          {getFileIcon()}
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate text-gray-200">{originalname}</div>
-            <div className="text-xs text-gray-400">{size}</div>
-          </div>
-        </div>
+        {renderFileMetadata(originalname, size)}
         <FileActions onViewInNewTab={handleViewInNewTab} onDownload={handleFileDownload} />
       </div>
     );
@@ -312,15 +314,13 @@ const FileMessage = ({
         align={isMine ? 'flex-end' : 'flex-start'}
         $css={{ gap: '$100' }}
       >
-        {/* Sender Info */}
         <HStack className="px-1" $css={{ gap: '$100', alignItems: 'center' }}>
           {renderAvatar()}
           <span className="text-sm font-medium text-gray-300">
-            {isMine ? '나' : msg.sender?.name}
+            {isMine ? 'Me' : msg.sender?.name || 'Unknown User'}
           </span>
         </HStack>
 
-        {/* Message Bubble - Outline Based */}
         <div className={`
           relative group
           rounded-2xl px-4 py-3
@@ -330,10 +330,7 @@ const FileMessage = ({
             : 'bg-transparent border-gray-400 hover:border-gray-300 hover:shadow-md'
           }
         `}>
-          {/* Message Content */}
-          <div className={`
-            ${isMine ? 'text-blue-100' : 'text-white'}
-          `}>
+          <div className={isMine ? 'text-blue-100' : 'text-white'}>
             {error && (
               <div>{error}</div>
             )}
@@ -345,7 +342,6 @@ const FileMessage = ({
             )}
           </div>
 
-          {/* Message Footer */}
           <HStack
             $css={{
               gap: '$150',
@@ -371,7 +367,6 @@ const FileMessage = ({
           </HStack>
         </div>
 
-        {/* Message Actions */}
         <MessageActions
           messageId={msg._id}
           messageContent={msg.content}

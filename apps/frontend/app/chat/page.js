@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
+import AuthRequiredFallback from '@/components/AuthRequiredFallback';
 import ChatHeader from '@/components/ChatHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import ChatRoomsView from '@/features/chat/rooms/ChatRoomsView';
@@ -28,12 +29,20 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.replace(`/?redirect=${pathname}`);
+      const redirectTimer = window.setTimeout(() => {
+        router.replace(`/?redirect=${pathname}`);
+      }, 100);
+
+      return () => window.clearTimeout(redirectTimer);
     }
   }, [isAuthenticated, isLoading, pathname, router]);
 
-  if (isLoading || !isAuthenticated) {
+  if (isLoading) {
     return <LoadingState />;
+  }
+
+  if (!isAuthenticated) {
+    return <AuthRequiredFallback />;
   }
 
   return (

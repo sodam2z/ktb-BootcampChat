@@ -87,6 +87,56 @@ public class FileUtil {
         }
     }
 
+    public static void validateFileMetadata(
+            String originalFilename,
+            String contentType,
+            long size
+    ) {
+        if (originalFilename == null || originalFilename.trim().isEmpty()) {
+            throw new RuntimeException("파일명이 올바르지 않습니다.");
+        }
+
+        int filenameBytes =
+                originalFilename.getBytes(StandardCharsets.UTF_8).length;
+
+        if (filenameBytes > 255) {
+            throw new RuntimeException("파일명이 너무 깁니다.");
+        }
+
+        if (contentType == null || !ALLOWED_TYPES.containsKey(contentType)) {
+            throw new RuntimeException("지원하지 않는 파일 형식입니다.");
+        }
+
+        String extension =
+                getFileExtension(originalFilename).toLowerCase();
+
+        List<String> allowedExtensions =
+                ALLOWED_TYPES.get(contentType);
+
+        if (allowedExtensions == null ||
+                !allowedExtensions.contains(extension)) {
+            throw new RuntimeException("파일 확장자가 올바르지 않습니다.");
+        }
+
+        String type = contentType.split("/")[0];
+
+        long limit = FILE_SIZE_LIMITS.getOrDefault(
+                type,
+                FILE_SIZE_LIMITS.get("application")
+        );
+
+        if (size <= 0 || size > limit) {
+            int limitInMB = (int) (limit / 1024 / 1024);
+
+            throw new RuntimeException(
+                    getFileType(contentType)
+                            + " 파일은 "
+                            + limitInMB
+                            + "MB를 초과할 수 없습니다."
+            );
+        }
+    }
+
     /**
      * 파일 타입 한글명 반환
      */
